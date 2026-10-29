@@ -96,7 +96,8 @@ git pull
 | `MODEL_URL` | `http://localhost:8000` | ใช้ model server ที่รันอยู่เครื่องอื่น |
 | `START_SERVER` | `1` | `0` = เปิดแค่หน้าเว็บ |
 | `MODEL_DIR` | `models\` ในโปรเจกต์ | ที่เก็บไฟล์โมเดล |
-| `GGUF_REPO`, `MODEL_FILE` | เลือกให้อัตโนมัติ | เลือก repo / ไฟล์โมเดลเอง |
+| `MODEL_QUANT` | เลือกตามการ์ดจอ | บังคับชนิดไฟล์ เช่น `NVFP4`, `IQ4_NL`, `Q8_0` — รัน `start.bat` ใหม่แล้วจะดาวน์โหลดและสลับให้เอง |
+| `GGUF_REPO`, `MODEL_FILE` | เลือกให้อัตโนมัติ | เลือก repo / ชื่อไฟล์โมเดลเอง |
 | `HF_TOKEN` | — | token ของ Hugging Face ถ้าการดาวน์โหลดขอ |
 | `NS_CHANNEL` | `nightly` | รุ่นของ NeMo-Speech.cpp — ต้องเป็น `nightly` เพราะรุ่น stable 0.2.0 ยังรันโมเดลนี้ไม่ได้ |
 | `HOST` | `127.0.0.1` | `0.0.0.0` = ให้มือถือ/เครื่องอื่นในวง LAN เปิดหน้าเว็บได้ |

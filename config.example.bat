@@ -25,7 +25,10 @@ set "NS_CHANNEL=nightly"
 rem Where model files are stored (20-35 GB)
 rem set "MODEL_DIR=D:\models\nemotron"
 
-rem Pick the GGUF yourself instead of by GPU (file name inside GGUF_REPO)
+rem Pick the decoder type yourself instead of by GPU: NVFP4, IQ4_NL, Q5, Q8_0 ...
+rem (start.bat downloads it and switches on the next run)
+rem set "MODEL_QUANT=NVFP4"
+rem Or an exact file name inside GGUF_REPO
 rem set "GGUF_REPO=nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-GGUF"
 rem set "MODEL_FILE=NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-AD-IQ4_NL.gguf"
 

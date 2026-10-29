@@ -90,7 +90,10 @@ echo [2/4] NeMo-Speech.cpp ready.
 rem ---- 3. Model files (GGUF), picked for this GPU ----
 echo [3/4] Checking model files. The first download is about 20-35 GB.
 ".venv\Scripts\python.exe" tools\get_model.py
-if errorlevel 1 goto fail
+if not errorlevel 1 goto model_ok
+if not exist "%MODEL_DIR%\selected.bat" goto fail
+echo [3/4] Could not switch models - keeping the model that is already installed.
+:model_ok
 set "USER_DEVICE=%DEVICE%"
 call "%MODEL_DIR%\selected.bat"
 if defined USER_DEVICE set "DEVICE=%USER_DEVICE%"

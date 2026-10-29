@@ -7,6 +7,8 @@ config for the GPU size and records the choice in `<model dir>/selected.bat`.
 
 Environment overrides:
   GGUF_REPO     Hugging Face repo to download from
+  MODEL_QUANT   decoder type to use instead of the GPU-based pick, e.g. NVFP4,
+                IQ4_NL, Q5, Q8_0 (matched against the file names)
   MODEL_FILE    exact decoder file name inside that repo
   MODEL_DIR     where to store models (default: <project>/models)
   HF_TOKEN      Hugging Face token, if the repo asks for one
@@ -227,13 +229,26 @@ def write_selected(decoder: Path, encoder: Path, config: Path, device: str) -> N
     )
 
 
+def wanted_decoder(path: str) -> bool:
+    """True when the decoder matches MODEL_FILE / MODEL_QUANT (or neither is set)."""
+    name = Path(path).name
+    if os.environ.get("MODEL_FILE"):
+        return name == os.environ["MODEL_FILE"] or path == os.environ["MODEL_FILE"]
+    if os.environ.get("MODEL_QUANT"):
+        return os.environ["MODEL_QUANT"].lower() in name.lower()
+    return True
+
+
 def read_selected() -> dict | None:
     if not SELECTED.exists():
         return None
     values = dict(re.findall(r'set "(\w+)=(.*)"', SELECTED.read_text(encoding="utf-8")))
-    if all(k in values and Path(values[k]).exists() for k in ("DECODER", "ENCODER", "SALM_CONFIG")):
-        return values
-    return None
+    if not all(k in values and Path(values[k]).exists() for k in ("DECODER", "ENCODER", "SALM_CONFIG")):
+        return None
+    if not wanted_decoder(values["DECODER"]):
+        log("The requested model differs from the one in use; picking it again.")
+        return None
+    return values
 
 
 def main() -> int:
@@ -247,9 +262,13 @@ def main() -> int:
         log(f"GPU: {gpu['name']}, {gpu['vram_gb']:.0f} GB, compute capability {gpu['cc']}")
     else:
         log("No NVIDIA GPU found: the model will run on the CPU and be slow.")
+    on_gpu = os.environ.get("DEVICE", "").lower() not in ("", "cpu", "-1")
     if gpu and gpu["vram_gb"] < 20:
-        log(f"The GPU has {gpu['vram_gb']:.0f} GB; the smallest model needs about 22 GB of GPU memory,")
-        log("so it will run on the CPU and system RAM instead (much slower).")
+        log(f"The GPU has {gpu['vram_gb']:.0f} GB; the smallest model needs about 22 GB of GPU memory.")
+        if on_gpu:
+            log(f"DEVICE={os.environ['DEVICE']}: using the GPU anyway; the NVIDIA driver spills the rest into system RAM.")
+        else:
+            log("It will run on the CPU and system RAM instead (much slower).")
 
     for repo in REPOS:
         try:
@@ -259,21 +278,28 @@ def main() -> int:
             log(f"{repo}: not available ({type(exc).__name__}: {str(exc)[:160]})")
             continue
         encoders = [p for p in files if "encoder" in Path(p).name.lower()]
-        decoders = {p: s for p, s in files.items() if is_decoder(p)}
+        decoders = {p: s for p, s in files.items() if is_decoder(p) and wanted_decoder(p)}
         if encoders and decoders:
             break
+        if encoders and any(is_decoder(p) for p in files):
+            have = ", ".join(sorted(Path(p).name for p in files if is_decoder(p)))
+            log(f"{repo}: no decoder matches MODEL_FILE/MODEL_QUANT. It has: {have}")
+            continue
         log(f"{repo}: no decoder/encoder GGUF pair found, trying the next source.")
     else:
-        log("ERROR: could not find the model GGUF files. Set GGUF_REPO in config.local.bat.")
+        wanted = os.environ.get("MODEL_FILE") or os.environ.get("MODEL_QUANT")
+        if wanted:
+            log(f"ERROR: no repo has a '{wanted}' decoder. Remove MODEL_QUANT/MODEL_FILE from")
+            log("config.local.bat to go back, or set GGUF_REPO to a repo that has that file.")
+        else:
+            log("ERROR: could not find the model GGUF files. Set GGUF_REPO in config.local.bat.")
         return 1
 
-    wanted = os.environ.get("MODEL_FILE")
-    if wanted:
-        match = [p for p in decoders if Path(p).name == wanted or p == wanted]
-        if not match:
-            log(f"ERROR: {wanted} is not in {repo}. Available: {', '.join(sorted(decoders))}")
-            return 1
-        decoder, profile = match[0], choose_decoder({match[0]: decoders[match[0]]}, gpu)[1]
+    if os.environ.get("MODEL_FILE") or os.environ.get("MODEL_QUANT"):
+        decoder = min(decoders, key=decoders.get)  # the smallest file of the requested type
+        profile = choose_decoder({decoder: decoders[decoder]}, gpu)[1]
+        if "nvfp4" in decoder.lower() and (gpu is None or gpu["cc"] < 10):
+            log("WARNING: NVFP4 runs natively only on Blackwell GPUs (RTX 50xx, RTX PRO 6000, B200).")
     else:
         decoder, profile = choose_decoder(decoders, gpu)
     encoder = min(encoders, key=len)
