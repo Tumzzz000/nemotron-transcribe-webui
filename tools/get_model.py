@@ -52,9 +52,15 @@ PROFILES = {
     "cpu": {  # no usable NVIDIA GPU: few slots, one hour per request
         "max_sequences": 4, "n_ctx_per_sequence": 18432, "mtp_draft": 0,
     },
+    "spill": {  # GPU smaller than the model, driver spills into system RAM: keep it lean
+        "max_sequences": 4, "n_ctx_per_sequence": 18432, "mtp_draft": 0,
+        "n_batch": 1024, "encoder_max_batch": 4,
+    },
 }
 
 ENCODER_GB = 1.7
+# Bump when choose_decoder changes, so existing installs pick again on the next start.
+PICK_RULES = "2"
 HF = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
 HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"} if os.environ.get("HF_TOKEN") else {}
 
@@ -165,12 +171,26 @@ def is_decoder(path: str) -> bool:
 
 
 def choose_decoder(decoders: dict[str, float], gpu: dict | None) -> tuple[str, str]:
-    """Return (decoder path, profile name)."""
-    if gpu is None or gpu["vram_gb"] < 20:
+    """Return (decoder path, profile name).
+
+    Blackwell GPUs default to an NVFP4 decoder, which they run natively. When it
+    does not fit in GPU memory it still runs on the GPU ("spill" profile) and the
+    NVIDIA driver keeps the rest in system RAM. Other GPUs that are too small run
+    on the CPU.
+    """
+    blackwell = gpu is not None and gpu["cc"] >= 10
+    nvfp4_all = {p: s for p, s in decoders.items() if "nvfp4" in p.lower()}
+    # Spilling only pays off when most of the model still sits on the GPU (12 GB or more).
+    spill_ok = blackwell and nvfp4_all and gpu["vram_gb"] >= 12
+    if gpu is None or (gpu["vram_gb"] < 20 and not spill_ok):
         small = [p for p in decoders if "iq4_nl" in p.lower()] or list(decoders)
         return min(small, key=decoders.get), "cpu"
 
-    vram, blackwell = gpu["vram_gb"], gpu["cc"] >= 10
+    vram = gpu["vram_gb"]
+    if blackwell and nvfp4_all:
+        smallest = min(nvfp4_all, key=nvfp4_all.get)
+        if vram < 20 or nvfp4_all[smallest] + ENCODER_GB + 2.5 > vram:
+            return smallest, "spill"
     profile = "large" if vram >= 78 else "default" if vram >= 30 else "small"
     margin = {"small": 2.5, "default": 4.5, "large": 12}[profile]
     fits = {p: s for p, s in decoders.items() if s + ENCODER_GB + margin <= vram}
@@ -224,7 +244,8 @@ def write_selected(decoder: Path, encoder: Path, config: Path, device: str) -> N
         f'set "DECODER={decoder}"\r\n'
         f'set "ENCODER={encoder}"\r\n'
         f'set "SALM_CONFIG={config}"\r\n'
-        f'set "DEVICE={device}"\r\n',
+        f'set "DEVICE={device}"\r\n'
+        f'set "PICK_RULES={PICK_RULES}"\r\n',
         encoding="utf-8",
     )
 
@@ -248,6 +269,9 @@ def read_selected() -> dict | None:
     if not wanted_decoder(values["DECODER"]):
         log("The requested model differs from the one in use; picking it again.")
         return None
+    if values.get("PICK_RULES") != PICK_RULES and not (os.environ.get("MODEL_FILE") or os.environ.get("MODEL_QUANT")):
+        log("Model selection rules were updated; checking the best model for this GPU again.")
+        return None
     return values
 
 
@@ -262,14 +286,6 @@ def main() -> int:
         log(f"GPU: {gpu['name']}, {gpu['vram_gb']:.0f} GB, compute capability {gpu['cc']}")
     else:
         log("No NVIDIA GPU found: the model will run on the CPU and be slow.")
-    on_gpu = os.environ.get("DEVICE", "").lower() not in ("", "cpu", "-1")
-    if gpu and gpu["vram_gb"] < 20:
-        log(f"The GPU has {gpu['vram_gb']:.0f} GB; the smallest model needs about 22 GB of GPU memory.")
-        if on_gpu:
-            log(f"DEVICE={os.environ['DEVICE']}: using the GPU anyway; the NVIDIA driver spills the rest into system RAM.")
-        else:
-            log("It will run on the CPU and system RAM instead (much slower).")
-
     for repo in REPOS:
         try:
             sizes = list_gguf(repo)
@@ -304,7 +320,13 @@ def main() -> int:
         decoder, profile = choose_decoder(decoders, gpu)
     encoder = min(encoders, key=len)
 
-    device = os.environ.get("DEVICE") or ("cpu" if profile == "cpu" else "")
+    device = os.environ.get("DEVICE") or {"cpu": "cpu", "spill": "cuda:0"}.get(profile, "")
+    if profile == "spill":
+        log(f"The {decoders[decoder]:.1f} GB decoder does not fit in {gpu['vram_gb']:.0f} GB of GPU memory: it runs on the")
+        log("GPU and the NVIDIA driver keeps the rest in system RAM. Keep 'CUDA Memory Fallback'")
+        log("(NVIDIA app > Graphics > Global Settings) at Driver Default or Prefer fallback.")
+    elif device == "cpu":
+        log("The model is larger than the GPU memory, so it runs on the CPU and system RAM (much slower).")
     if device == "cpu":
         ram = total_ram_gb()
         need = decoders[decoder] + ENCODER_GB + 4

@@ -37,10 +37,11 @@ clone ลงเครื่องแล้วดับเบิลคลิก `
 
 | การ์ดจอ | ไฟล์ที่เลือก | ยาวสุดต่อไฟล์ |
 |---|---|---|
-| RTX 50xx / RTX PRO (Blackwell) 32 GB ขึ้นไป | NVFP4 (เร็วที่สุด) | 1 ชั่วโมง |
+| RTX 50xx / RTX PRO (Blackwell) 32 GB ขึ้นไป | **NVFP4** (เร็วที่สุด) | 1 ชั่วโมง |
+| RTX 50xx (Blackwell) 12–24 GB เช่น 5070 Ti / 5080 | **NVFP4** บนการ์ดจอ ส่วนที่ไม่พอไดรเวอร์ NVIDIA ย้ายไป RAM ให้ (ต้องเปิด *CUDA Memory Fallback*) | 1 ชั่วโมง |
 | 32–48 GB รุ่นอื่น | รุ่นที่ใหญ่ที่สุดที่ลงได้ (Q5/Q8) | 1 ชั่วโมง |
 | 24 GB (เช่น RTX 3090/4090) | IQ4_NL + ตั้งค่าประหยัดหน่วยความจำ | ประมาณ 29 นาที |
-| ต่ำกว่า 20 GB (เช่น RTX 5070 Ti / 5080 16 GB) หรือไม่มีการ์ด NVIDIA | IQ4_NL **รันบน CPU + RAM** (ช้ากว่ามาก, ต้องมี RAM ~32 GB) | 1 ชั่วโมง |
+| การ์ดรุ่นอื่นต่ำกว่า 20 GB หรือไม่มีการ์ด NVIDIA | IQ4_NL **รันบน CPU + RAM** (ช้ากว่ามาก, ต้องมี RAM ~32 GB) | 1 ชั่วโมง |
 
 ### การ์ดจอเล็กกว่า 24 GB
 
@@ -49,11 +50,12 @@ clone ลงเครื่องแล้วดับเบิลคลิก `
 
 1. **รันบน CPU** (`start.bat` เลือกให้อัตโนมัติ) — ต้องมี RAM ประมาณ 32 GB ขึ้นไป ใช้ได้แต่ช้ากว่า GPU มาก
 2. **ใช้ model server เครื่องอื่น** ที่มีการ์ด 24 GB ขึ้นไป (หรือเช่า cloud GPU) แล้วตั้ง `MODEL_URL` และ `START_SERVER=0`
-3. **ทดลอง: ให้การ์ดจอประมวลผล แล้วให้ไดรเวอร์ NVIDIA ล้นไปใช้ RAM** — บน Windows ไดรเวอร์ NVIDIA
-   (536.40 ขึ้นไป) มีฟีเจอร์ *CUDA - Sysmem Fallback Policy* ที่ให้ส่วนที่ไม่พอใน VRAM ไปอยู่ใน RAM ระบบผ่าน PCIe
-   - NVIDIA Control Panel → Manage 3D settings → *CUDA - Sysmem Fallback Policy* = **Driver Default** หรือ **Prefer Sysmem Fallback**
-   - ใส่ `set "DEVICE=cuda:0"` ใน `config.local.bat` แล้วรัน `start.bat` ใหม่
-   - ไม่มีอะไรรับประกัน: อาจเร็วกว่า CPU หรือช้ากว่าก็ได้ ขึ้นกับว่าไดรเวอร์ย้ายส่วนไหนไป RAM — ลองไฟล์สั้นเทียบตัวเลข ×realtime กับโหมด CPU
+3. **ให้การ์ดจอประมวลผล แล้วให้ไดรเวอร์ NVIDIA ล้นไปใช้ RAM** (ค่าเริ่มต้นสำหรับการ์ด Blackwell 12 GB ขึ้นไป) —
+   ไดรเวอร์ NVIDIA บน Windows (536.40 ขึ้นไป) ย้ายส่วนที่ไม่พอใน VRAM ไปไว้ใน RAM ระบบผ่าน PCIe ให้เอง
+   - NVIDIA app → Graphics → Global Settings → **CUDA Memory Fallback** = **Driver Default** หรือ **Prefer fallback**
+     (NVIDIA Control Panel: Manage 3D settings → *CUDA - Sysmem Fallback Policy*) — ห้ามตั้ง *Prefer no fallback*
+   - การ์ดรุ่นอื่นลองได้ด้วย `set "DEVICE=cuda:0"` ใน `config.local.bat`
+   - ความเร็วขึ้นกับว่าไดรเวอร์ย้ายส่วนไหนไป RAM — ลองไฟล์สั้นเทียบตัวเลข ×realtime กับโหมด CPU (`set "DEVICE=cpu"`)
 4. **โมเดลเล็ก Nemotron 3.5 ASR Streaming 0.6B** รันบนการ์ด 16 GB สบาย แต่ภาษาไทยอยู่ในกลุ่มที่ NVIDIA ระบุว่า
    ต้อง fine-tune ก่อนใช้งานจริง — ไม่แนะนำสำหรับภาษาไทย
 

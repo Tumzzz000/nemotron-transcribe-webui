@@ -102,6 +102,7 @@ set "DEVICE_ARG="
 if /i "%DEVICE%"=="cpu" set "DEVICE_ARG=--asr.backend.gpu -1"
 if defined DEVICE if /i not "%DEVICE%"=="cpu" set "DEVICE_ARG=--asr.backend.gpu %DEVICE:cuda:=%"
 if /i "%DEVICE%"=="cpu" echo [3/4] Running on the CPU: expect transcription to be much slower than on a GPU.
+echo [3/4] Model: %DECODER%  (device: %DEVICE%)
 
 echo [3/4] Starting the model server in a new window (loading takes a few minutes).
 start "Nemotron model server" cmd /k ""%NS_EXE%" serve --asr-model "%DECODER%" --asr.salm.encoder_path "%ENCODER%" --config "%SALM_CONFIG%" --host 127.0.0.1 --port %MODEL_PORT% %DEVICE_ARG% --read-timeout 600 --write-timeout 3600"
