@@ -92,6 +92,42 @@ server/setup.sh        ติดตั้ง vLLM + NeMo Speech ใน ~/.nemotr
 server/start-vllm.sh   เลือก checkpoint ตามการ์ดจอ ดาวน์โหลด และรัน vllm serve
 ```
 
+## WSL troubleshooting
+
+ถ้า `start.bat` ขึ้นว่า WSL ใช้ไม่ได้ หรือหน้าต่าง vLLM ขึ้น
+`WSL installation appears to be corrupted (Error code: Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG)`
+ให้แก้ตามลำดับ (เปิด PowerShell แบบ **Run as administrator**):
+
+1. อัปเดต / ซ่อม WSL แล้วรีสตาร์ทเครื่อง
+
+   ```powershell
+   wsl --update --web-download
+   ```
+
+2. ถ้ายังไม่หาย เปิดฟีเจอร์ของ Windows ที่ WSL ต้องใช้ แล้วรีสตาร์ทเครื่อง
+
+   ```powershell
+   dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+   ```
+
+   ```powershell
+   dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+   ```
+
+3. ถ้ายังไม่หาย ถอน **Windows Subsystem for Linux** ออกจาก *Settings → Apps → Installed apps*
+   แล้วติดตั้งใหม่จากไฟล์ `.msi` ล่าสุดที่ https://github.com/microsoft/WSL/releases แล้วรีสตาร์ทเครื่อง
+
+4. ติดตั้ง Ubuntu แล้วตั้งชื่อผู้ใช้/รหัสผ่านตามที่ถาม
+
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+
+5. ตรวจว่าใช้ได้: `wsl -e echo ok` ต้องตอบ `ok` และ `wsl -e nvidia-smi` ต้องเห็นการ์ดจอ
+   จากนั้นรัน `start.bat` ใหม่
+
+ต้องเปิด Virtualization (Intel VT-x / AMD-V หรือ SVM) ใน BIOS ด้วย เช็คได้ที่ Task Manager → Performance → CPU → *Virtualization: Enabled*
+
 ## ข้อจำกัดที่ควรรู้
 
 - คำสั่งติดตั้งและ flag ของ `vllm serve` อ้างอิงจากข้อมูลที่ NVIDIA ประกาศตอนเปิดตัว (ต.ค. 2026)

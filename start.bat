@@ -49,8 +49,11 @@ if not "%START_SERVER%"=="1" (
 )
 where wsl >nul 2>nul
 if errorlevel 1 goto no_wsl
-wsl -e true >nul 2>nul
-if errorlevel 1 goto no_wsl
+rem A broken WSL install prints errors or prompts instead of running the command,
+rem so require the exact expected output.
+set "WSL_OK="
+for /f "usebackq delims=" %%L in (`wsl -e echo wsl-ok ^<nul 2^>nul`) do if "%%L"=="wsl-ok" set "WSL_OK=1"
+if not defined WSL_OK goto no_wsl
 
 echo [2/3] Starting vLLM server in a new window.
 echo       First run installs vLLM and downloads the model: this can take 30+ minutes.
@@ -59,9 +62,12 @@ start "Nemotron vLLM server" cmd /k wsl --cd "%~dp0server" bash ./start-vllm.sh
 goto webui
 
 :no_wsl
-echo [2/3] WARNING: WSL2 with a Linux distro is required to run the model on Windows.
-echo       Install it once from an administrator terminal:  wsl --install -d Ubuntu
-echo       then restart the PC and run start.bat again.
+echo [2/3] WARNING: WSL2 is missing, broken, or has no Linux distro installed.
+echo       It is required to run the model on Windows. Fix it once from an
+echo       administrator PowerShell, restart the PC, then run start.bat again:
+echo           wsl --update
+echo           wsl --install -d Ubuntu
+echo       If WSL still reports it is corrupted, see "WSL troubleshooting" in README.md
 echo       The web UI still opens and can use a vLLM server elsewhere - set it in Settings.
 
 rem ---- 3. Web UI ----
