@@ -195,13 +195,34 @@ def write_config(profile: str) -> Path:
     return path
 
 
-def write_selected(decoder: Path, encoder: Path, config: Path) -> None:
+def total_ram_gb() -> float | None:
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            status = MemoryStatus(dwLength=ctypes.sizeof(MemoryStatus))
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+            return status.ullTotalPhys / 1024**3
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
+    except Exception:
+        return None
+
+
+def write_selected(decoder: Path, encoder: Path, config: Path, device: str) -> None:
     SELECTED.write_text(
         "@echo off\r\n"
         "rem Written by tools/get_model.py. Delete this file to pick the model again.\r\n"
         f'set "DECODER={decoder}"\r\n'
         f'set "ENCODER={encoder}"\r\n'
-        f'set "SALM_CONFIG={config}"\r\n',
+        f'set "SALM_CONFIG={config}"\r\n'
+        f'set "DEVICE={device}"\r\n',
         encoding="utf-8",
     )
 
@@ -227,7 +248,8 @@ def main() -> int:
     else:
         log("No NVIDIA GPU found: the model will run on the CPU and be slow.")
     if gpu and gpu["vram_gb"] < 20:
-        log("WARNING: this GPU has less than 20 GB of memory; the model may not fit or will be slow.")
+        log(f"The GPU has {gpu['vram_gb']:.0f} GB; the smallest model needs about 22 GB of GPU memory,")
+        log("so it will run on the CPU and system RAM instead (much slower).")
 
     for repo in REPOS:
         try:
@@ -256,6 +278,18 @@ def main() -> int:
         decoder, profile = choose_decoder(decoders, gpu)
     encoder = min(encoders, key=len)
 
+    device = os.environ.get("DEVICE") or ("cpu" if profile == "cpu" else "")
+    if device == "cpu":
+        ram = total_ram_gb()
+        need = decoders[decoder] + ENCODER_GB + 4
+        if ram is not None:
+            log(f"System RAM: {ram:.0f} GB (CPU mode needs about {need:.0f} GB).")
+            if ram < need:
+                log("WARNING: not enough RAM for CPU mode; the server will probably fail to load the model.")
+                answer = input("  Download the model anyway? [y/N] ").strip().lower()
+                if answer not in ("y", "yes"):
+                    log("Stopped. See README.md (GPU smaller than 24 GB) for other options.")
+                    return 1
     target = MODEL_DIR / repo.split("/")[-1]
     log(f"Source:  https://huggingface.co/{repo}")
     log(f"Decoder: {decoder} ({decoders[decoder]:.1f} GB)")
@@ -266,7 +300,7 @@ def main() -> int:
         paths[name] = download(repo, name, sizes[name], target / name)
 
     config = write_config(profile)
-    write_selected(paths[decoder], paths[encoder], config)
+    write_selected(paths[decoder], paths[encoder], config, device)
     log(f"Server settings: {profile} profile ({config.name}).")
     return 0
 

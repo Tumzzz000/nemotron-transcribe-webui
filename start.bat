@@ -14,6 +14,7 @@ set "NS_CHANNEL=stable"
 set "MODEL_DIR=%~dp0models"
 set "MODEL_VARIANT="
 set "EXTRA_VLLM_ARGS="
+set "DEVICE="
 if exist config.local.bat call config.local.bat
 if not defined MODEL_URL set "MODEL_URL=http://localhost:%MODEL_PORT%"
 
@@ -82,10 +83,15 @@ rem ---- 3. Model files (GGUF), picked for this GPU ----
 echo [3/4] Checking model files. The first download is about 20-35 GB.
 ".venv\Scripts\python.exe" tools\get_model.py
 if errorlevel 1 goto fail
+set "USER_DEVICE=%DEVICE%"
 call "%MODEL_DIR%\selected.bat"
+if defined USER_DEVICE set "DEVICE=%USER_DEVICE%"
+set "DEVICE_ARG="
+if defined DEVICE set "DEVICE_ARG=--device %DEVICE%"
+if /i "%DEVICE%"=="cpu" echo [3/4] Running on the CPU: expect transcription to be much slower than on a GPU.
 
 echo [3/4] Starting the model server in a new window (loading takes a few minutes).
-start "Nemotron model server" cmd /k ""%NS_EXE%" serve --asr-model "%DECODER%" --asr.salm.encoder_path "%ENCODER%" --config "%SALM_CONFIG%" --host 127.0.0.1 --port %MODEL_PORT% --read-timeout 600 --write-timeout 3600"
+start "Nemotron model server" cmd /k ""%NS_EXE%" serve --asr-model "%DECODER%" --asr.salm.encoder_path "%ENCODER%" --config "%SALM_CONFIG%" --host 127.0.0.1 --port %MODEL_PORT% %DEVICE_ARG% --read-timeout 600 --write-timeout 3600"
 goto webui
 
 rem ---- 2-3. Optional: vLLM inside WSL2 (BACKEND=vllm) ----

@@ -37,3 +37,6 @@ rem set "HOST=0.0.0.0"
 rem BACKEND=vllm only: NVFP4 / FP8 / BF16 and extra `vllm serve` flags
 set "MODEL_VARIANT="
 set "EXTRA_VLLM_ARGS="
+
+rem Force where the model runs: cpu, cuda:0 ... (default: picked by start.bat)
+rem set "DEVICE=cpu"
