@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nemotron Transcribe</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%2376b900'/><path d='M6 10v4M9 7v10M12 9v6M15 5v14M18 10v4' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f1f3f6; --text: #16181d; --muted: #6b7280;
+    --border: #e3e6eb; --accent: #76b900; --accent-ink: #ffffff; --accent-soft: #eef7dc;
+    --danger: #d93f3f; --ok: #2f9e44; --warn: #e8a317; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 16px rgba(16,24,40,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1114; --panel: #171a1f; --panel-2: #1f232a; --text: #e8eaed; --muted: #9aa1ac;
+      --border: #2a2f37; --accent-soft: #233016; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1114; --panel: #171a1f; --panel-2: #1f232a; --text: #e8eaed; --muted: #9aa1ac;
+    --border: #2a2f37; --accent-soft: #233016; --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 "Segoe UI", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+    border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  .logo { flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; white-space: nowrap; }
+  h1 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .spacer { flex: 1; }
+  .status { min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+    padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; background: none; }
+  .status #statusText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+  @media (max-width: 600px) { h1 small { display: none; } .status #statusText { max-width: 110px; } header { padding: 10px 16px; gap: 8px; } }
+  .dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--danger); }
+  .icon-btn { flex-shrink: 0; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; width: 34px; height: 34px;
+    display: grid; place-items: center; cursor: pointer; }
+  .icon-btn:hover { background: var(--panel-2); }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px; display: grid; gap: 20px;
+    grid-template-columns: minmax(0, 420px) minmax(0, 1fr); }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 16px; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .stack > * + * { margin-top: 18px; }
+  .drop { border: 1.5px dashed var(--border); border-radius: 12px; padding: 22px 16px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { display: block; margin-bottom: 2px; }
+  .drop span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--border); background: var(--panel); padding: 8px 14px; border-radius: 9px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; }
+  .btn:hover { background: var(--panel-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.danger { color: var(--danger); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.wide { width: 100%; justify-content: center; padding: 11px; }
+  .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }
+  .recording .rec-dot { animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .file-info { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .file-info b { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  audio { width: 100%; height: 40px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
+  .chip.active { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  label.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  textarea, input[type=text], input[type=number], select { width: 100%; border: 1px solid var(--border); background: var(--panel-2);
+    border-radius: 9px; padding: 9px 11px; outline: none; }
+  textarea:focus, input:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 76px; }
+  .output-card { display: flex; flex-direction: column; min-height: 560px; }
+  .out-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .out-head h2 { margin: 0; }
+  .stats { display: flex; gap: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  #output { flex: 1; white-space: pre-wrap; word-wrap: break-word; background: var(--panel-2); border-radius: 10px; padding: 16px;
+    overflow: auto; max-height: 70vh; min-height: 300px; font-size: 15.5px; line-height: 1.75; }
+  #output.empty { color: var(--muted); display: grid; place-items: center; text-align: center; }
+  #output .err { color: var(--danger); }
+  details.reason { margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+  details.reason pre { white-space: pre-wrap; background: var(--panel-2); padding: 10px; border-radius: 8px; max-height: 200px; overflow: auto; margin: 8px 0 0; }
+  .history { margin-top: 18px; }
+  .history ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .history li { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; font-size: 14px; }
+  .history li:hover { background: var(--panel-2); }
+  .history li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history li time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(520px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  .dlg-body { padding: 20px; } .dlg-body > * + * { margin-top: 14px; }
+  .dlg-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+    padding: 8px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M4 10v4M8 7v10M12 9v6M16 5v14M20 10v4"/></svg></div>
+  <h1>Nemotron Transcribe <small>Web UI</small></h1>
+  <div class="spacer"></div>
+  <button class="status" id="statusBtn" title="คลิกเพื่อตรวจสอบการเชื่อมต่ออีกครั้ง"><span class="dot" id="statusDot"></span><span id="statusText">กำลังตรวจสอบ…</span></button>
+  <button class="icon-btn" id="themeBtn" title="สลับธีม"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+  <button class="icon-btn" id="settingsBtn" title="ตั้งค่า"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+</header>
+
+<main>
+  <section class="stack">
+    <div class="card">
+      <h2>1 · ไฟล์เสียง</h2>
+      <div class="drop" id="drop">
+        <strong>ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</strong>
+        <span>mp3, wav, m4a, flac, ogg, mp4, mkv … ยาวสูงสุดประมาณ 1 ชั่วโมง</span>
+        <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="recBtn"><span class="rec-dot"></span><span id="recText">อัดเสียงจากไมค์</span></button>
+        <button class="btn danger" id="clearBtn" hidden>ล้างไฟล์</button>
+      </div>
+      <div id="fileBox" hidden style="margin-top:12px">
+        <div class="file-info"><b id="fileName"></b><span id="fileMeta"></span></div>
+        <audio id="player" controls style="margin-top:8px"></audio>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2 · ต้องการให้ทำอะไร</h2>
+      <div class="chips" id="presets"></div>
+      <div style="margin-top:14px">
+        <label class="field" for="lang">ภาษาในไฟล์เสียง</label>
+        <select id="lang">
+          <option value="">ตรวจจับอัตโนมัติ</option>
+          <option>Thai</option><option>English</option><option>Japanese</option><option>Korean</option>
+          <option>Chinese</option><option>Vietnamese</option><option>Spanish</option><option>French</option>
+          <option>German</option><option>Russian</option><option>Arabic</option><option>Hindi</option>
+        </select>
+      </div>
+      <div style="margin-top:14px">
+        <label class="field" for="prompt">Prompt ที่จะส่งให้โมเดล (แก้ได้)</label>
+        <textarea id="prompt"></textarea>
+      </div>
+      <div style="margin-top:16px" class="row">
+        <button class="btn primary wide" id="runBtn" disabled>เริ่มประมวลผล</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card output-card">
+      <div class="out-head">
+        <h2>ผลลัพธ์</h2>
+        <div class="stats" id="stats"></div>
+        <div class="spacer"></div>
+        <button class="btn" id="copyBtn" disabled>คัดลอก</button>
+        <button class="btn" id="saveBtn" disabled>บันทึก .txt</button>
+      </div>
+      <details class="reason" id="reasonBox" hidden><summary>ความคิดของโมเดล (reasoning)</summary><pre id="reasonText"></pre></details>
+      <div id="output" class="empty">เลือกไฟล์เสียง แล้วกด “เริ่มประมวลผล”</div>
+      <div class="history" id="historyBox" hidden>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">ประวัติ</h2><button class="btn" id="clearHist" style="padding:4px 10px;font-size:13px">ล้างประวัติ</button></div>
+        <ul id="historyList"></ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <form method="dialog">
+    <div class="dlg-body">
+      <h2 style="margin:0;font-size:17px">ตั้งค่า</h2>
+      <div>
+        <label class="field" for="sUrl">ที่อยู่ vLLM server</label>
+        <input type="text" id="sUrl" placeholder="http://localhost:8000">
+      </div>
+      <div>
+        <label class="field" for="sModel">โมเดล</label>
+        <div class="row" style="flex-wrap:nowrap"><select id="sModel"><option value="">ใช้ตัวแรกที่ server โหลดไว้</option></select>
+        <button type="button" class="btn" id="sRefresh">รีเฟรช</button></div>
+      </div>
+      <div class="grid2">
+        <div><label class="field" for="sTemp">Temperature</label><input type="number" id="sTemp" min="0" max="2" step="0.1"></div>
+        <div><label class="field" for="sMax">Max tokens</label><input type="number" id="sMax" min="256" max="65536" step="256"></div>
+      </div>
+      <div>
+        <label class="field" for="sSystem">System prompt (ไม่บังคับ)</label>
+        <textarea id="sSystem" style="min-height:60px"></textarea>
+      </div>
+      <label class="check"><input type="checkbox" id="sReason"> แสดง reasoning ของโมเดล (ถ้ามี)</label>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" value="cancel">ยกเลิก</button>
+      <button class="btn primary" value="ok" id="sSave">บันทึก</button>
+    </div>
+  </form>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("ntw." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("ntw." + k, JSON.stringify(v)); } catch {} },
+};
+
+// ---------- theme ----------
+function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
+applyTheme(store.get("theme", ""));
+$("themeBtn").onclick = () => {
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  const t = dark ? "light" : "dark"; applyTheme(t); store.set("theme", t);
+};
+
+// ---------- settings ----------
+let settings = { vllm_url: "", model: "", temperature: 0, max_tokens: 16384, system: "", show_reasoning: false, ...store.get("settings", {}) };
+async function loadDefaults() {
+  try {
+    const cfg = await (await fetch("/api/config")).json();
+    if (!settings.vllm_url) settings.vllm_url = cfg.vllm_url;
+    if (!settings.model && cfg.model) settings.model = cfg.model;
+  } catch {}
+}
+
+async function checkStatus() {
+  $("statusDot").className = "dot"; $("statusText").textContent = "กำลังตรวจสอบ…";
+  try {
+    const r = await (await fetch("/api/status?vllm_url=" + encodeURIComponent(settings.vllm_url))).json();
+    if (r.ok) {
+      $("statusDot").className = "dot ok";
+      const m = settings.model || r.models[0] || "ไม่มีโมเดล";
+      $("statusText").textContent = "เชื่อมต่อแล้ว · " + m.split("/").pop();
+      fillModels(r.models);
+    } else {
+      $("statusDot").className = "dot bad"; $("statusText").textContent = "รอ vLLM server…";
+      $("statusBtn").title = r.error;
+    }
+    return r;
+  } catch (e) {
+    $("statusDot").className = "dot bad"; $("statusText").textContent = "Web UI server หยุดทำงาน";
+  }
+}
+function fillModels(models) {
+  const sel = $("sModel"); const cur = settings.model;
+  sel.innerHTML = '<option value="">ใช้ตัวแรกที่ server โหลดไว้</option>' +
+    models.map(m => `<option value="${m.replace(/"/g, "&quot;")}">${m}</option>`).join("");
+  sel.value = models.includes(cur) ? cur : "";
+}
+$("statusBtn").onclick = checkStatus;
+$("settingsBtn").onclick = () => {
+  $("sUrl").value = settings.vllm_url; $("sTemp").value = settings.temperature; $("sMax").value = settings.max_tokens;
+  $("sSystem").value = settings.system; $("sReason").checked = settings.show_reasoning; $("sModel").value = settings.model;
+  $("settings").showModal();
+};
+$("sRefresh").onclick = async () => {
+  const r = await (await fetch("/api/status?vllm_url=" + encodeURIComponent($("sUrl").value))).json();
+  if (r.ok) { fillModels(r.models); toast("พบ " + r.models.length + " โมเดล"); } else toast("เชื่อมต่อไม่ได้: " + r.error);
+};
+$("settings").addEventListener("close", () => {
+  if ($("settings").returnValue !== "ok") return;
+  settings = { vllm_url: $("sUrl").value.trim() || "http://localhost:8000", model: $("sModel").value,
+    temperature: parseFloat($("sTemp").value) || 0, max_tokens: parseInt($("sMax").value) || 16384,
+    system: $("sSystem").value, show_reasoning: $("sReason").checked };
+  store.set("settings", settings); checkStatus().then(r => { connected = !!r?.ok; });
+});
+
+// ---------- presets ----------
+const PRESETS = [
+  { id: "plain", label: "ถอดเสียง", prompt: "Transcribe the audio." },
+  { id: "speakers", label: "ถอดเสียง + แยกผู้พูด", prompt: "Transcribe the audio with speaker labels." },
+  { id: "timestamps", label: "ถอดเสียง + เวลา", prompt: "Transcribe the audio with timestamps." },
+  { id: "summary", label: "สรุปเนื้อหา", prompt: "Summarize the content of this audio in Thai." },
+  { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "Based on the audio, answer: " },
+];
+let preset = store.get("preset", "plain");
+function buildPrompt() {
+  const p = PRESETS.find(x => x.id === preset) || PRESETS[0];
+  const lang = $("lang").value;
+  return p.prompt + (lang && p.id !== "qa" ? ` The audio is in ${lang}.` : "");
+}
+function renderPresets() {
+  $("presets").innerHTML = "";
+  for (const p of PRESETS) {
+    const b = document.createElement("button");
+    b.className = "chip" + (p.id === preset ? " active" : ""); b.textContent = p.label;
+    b.onclick = () => { preset = p.id; store.set("preset", preset); renderPresets(); $("prompt").value = buildPrompt();
+      if (p.id === "qa") { $("prompt").focus(); $("prompt").setSelectionRange(1e4, 1e4); } };
+    $("presets").appendChild(b);
+  }
+}
+$("lang").value = store.get("lang", "");
+$("lang").onchange = () => { store.set("lang", $("lang").value); $("prompt").value = buildPrompt(); };
+
+// ---------- audio input ----------
+let audioFile = null;
+function fmtTime(s) { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); }
+function fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB"; }
+function setFile(f) {
+  audioFile = f;
+  $("fileBox").hidden = !f; $("clearBtn").hidden = !f; $("runBtn").disabled = !f;
+  if (!f) { $("player").removeAttribute("src"); return; }
+  $("fileName").textContent = f.name; $("fileMeta").textContent = fmtSize(f.size);
+  $("player").src = URL.createObjectURL(f);
+  $("player").onloadedmetadata = () => { if (isFinite($("player").duration)) $("fileMeta").textContent = fmtTime($("player").duration) + " · " + fmtSize(f.size); };
+}
+$("drop").onclick = () => $("fileInput").click();
+$("fileInput").onchange = (e) => e.target.files[0] && setFile(e.target.files[0]);
+$("clearBtn").onclick = () => { setFile(null); $("fileInput").value = ""; };
+["dragenter", "dragover"].forEach(ev => $("drop").addEventListener(ev, e => { e.preventDefault(); $("drop").classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => $("drop").addEventListener(ev, e => { e.preventDefault(); $("drop").classList.remove("over"); }));
+$("drop").addEventListener("drop", e => e.dataTransfer.files[0] && setFile(e.dataTransfer.files[0]));
+
+let recorder = null, recTimer = null;
+$("recBtn").onclick = async () => {
+  if (recorder) { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = []; recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop()); clearInterval(recTimer);
+      const type = recorder.mimeType || "audio/webm"; const ext = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm";
+      setFile(new File(chunks, `recording-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${ext}`, { type }));
+      recorder = null; $("recBtn").classList.remove("recording"); $("recText").textContent = "อัดเสียงจากไมค์";
+    };
+    recorder.start(); const t0 = Date.now();
+    $("recBtn").classList.add("recording"); $("recText").textContent = "กำลังอัด 0:00 — คลิกเพื่อหยุด";
+    recTimer = setInterval(() => $("recText").textContent = `กำลังอัด ${fmtTime((Date.now() - t0) / 1000)} — คลิกเพื่อหยุด`, 500);
+  } catch (e) { toast("เปิดไมโครโฟนไม่ได้: " + e.message); }
+};
+
+// ---------- run ----------
+let controller = null, resultText = "", lastName = "transcript";
+function setOutput(text, isErr) {
+  const o = $("output"); o.classList.toggle("empty", !text && !isErr);
+  if (isErr) { o.innerHTML = ""; const d = document.createElement("div"); d.className = "err"; d.textContent = text; o.appendChild(d); }
+  else o.textContent = text;
+}
+function renderStats(s) {
+  const parts = [];
+  if (s.duration) parts.push(`เสียง <b>${fmtTime(s.duration)}</b>`);
+  if (s.elapsed != null) parts.push(`ใช้เวลา <b>${s.elapsed.toFixed(1)} วิ</b>`);
+  if (s.duration && s.elapsed > 0.5 && s.done) parts.push(`เร็ว <b>${(s.duration / s.elapsed).toFixed(1)}×</b> realtime`);
+  $("stats").innerHTML = parts.map(x => `<span>${x}</span>`).join("");
+}
+$("runBtn").onclick = async () => {
+  if (controller) { controller.abort(); return; }
+  if (!audioFile) return;
+  const fd = new FormData();
+  fd.append("file", audioFile, audioFile.name);
+  fd.append("prompt", $("prompt").value.trim() || "Transcribe the audio.");
+  fd.append("system", settings.system); fd.append("vllm_url", settings.vllm_url); fd.append("model", settings.model);
+  fd.append("temperature", settings.temperature); fd.append("max_tokens", settings.max_tokens);
+
+  controller = new AbortController(); resultText = ""; let reasoning = ""; let errored = false;
+  lastName = audioFile.name.replace(/\.[^.]+$/, "");
+  const st = { duration: 0, elapsed: null, done: false }; const t0 = performance.now();
+  $("runBtn").innerHTML = '<span class="spinner"></span> กำลังประมวลผล… (คลิกเพื่อหยุด)';
+  $("copyBtn").disabled = $("saveBtn").disabled = true; $("reasonBox").hidden = true; $("reasonText").textContent = "";
+  setOutput(""); $("output").classList.add("empty"); $("output").textContent = "กำลังอัปโหลดและแปลงไฟล์เสียง…";
+  const tick = setInterval(() => { st.elapsed = (performance.now() - t0) / 1000; renderStats(st); }, 250);
+
+  try {
+    const resp = await fetch("/api/transcribe", { method: "POST", body: fd, signal: controller.signal });
+    if (!resp.ok) { let msg = resp.statusText; try { msg = (await resp.json()).detail || msg; } catch {} throw new Error(msg); }
+    $("output").textContent = "กำลังรอโมเดลตอบ… (ไฟล์ยาวอาจใช้เวลาสักพัก)";
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim(); if (data === "[DONE]") continue;
+        let msg; try { msg = JSON.parse(data); } catch { continue; }
+        if (msg.meta) { st.duration = msg.meta.duration; continue; }
+        if (msg.error) { throw new Error(typeof msg.error === "string" ? msg.error : (msg.error.message || JSON.stringify(msg.error))); }
+        const delta = msg.choices?.[0]?.delta || {};
+        const r = delta.reasoning_content ?? delta.reasoning;
+        if (r) { reasoning += r; if (settings.show_reasoning) { $("reasonBox").hidden = false; $("reasonText").textContent = reasoning; } }
+        if (delta.content) { resultText += delta.content; setOutput(resultText); $("output").scrollTop = $("output").scrollHeight; }
+      }
+    }
+    if (!resultText) setOutput(reasoning ? "(โมเดลไม่ได้ตอบเนื้อหา — ลองเปิดดู reasoning ในตั้งค่า)" : "(ไม่มีผลลัพธ์)");
+  } catch (e) {
+    errored = true;
+    if (e.name === "AbortError") { if (!resultText) setOutput("หยุดแล้ว"); }
+    else setOutput((resultText ? resultText + "\n\n" : "") + "⚠ " + e.message, true);
+  } finally {
+    clearInterval(tick); st.elapsed = (performance.now() - t0) / 1000; st.done = !errored; renderStats(st);
+    controller = null; $("runBtn").textContent = "เริ่มประมวลผล";
+    $("copyBtn").disabled = $("saveBtn").disabled = !resultText;
+    if (resultText) addHistory({ name: audioFile?.name || lastName, text: resultText, at: Date.now() });
+  }
+};
+
+$("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText(resultText); toast("คัดลอกแล้ว"); } catch { toast("คัดลอกไม่สำเร็จ"); } };
+$("saveBtn").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([resultText], { type: "text/plain;charset=utf-8" }));
+  a.download = lastName + ".txt"; a.click(); URL.revokeObjectURL(a.href);
+};
+
+// ---------- history (this browser only) ----------
+let hist = store.get("history", []);
+function addHistory(h) { hist = [h, ...hist].slice(0, 30); store.set("history", hist); renderHistory(); }
+function renderHistory() {
+  $("historyBox").hidden = !hist.length; $("historyList").innerHTML = "";
+  hist.forEach(h => {
+    const li = document.createElement("li");
+    const s = document.createElement("span"); s.textContent = h.name + " — " + h.text.slice(0, 120);
+    const t = document.createElement("time"); t.textContent = new Date(h.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+    li.append(s, t);
+    li.onclick = () => { resultText = h.text; lastName = h.name.replace(/\.[^.]+$/, ""); setOutput(h.text); $("stats").innerHTML = "";
+      $("copyBtn").disabled = $("saveBtn").disabled = false; };
+    $("historyList").appendChild(li);
+  });
+}
+$("clearHist").onclick = () => { hist = []; store.set("history", hist); renderHistory(); };
+
+let toastT; function toast(m) { $("toast").textContent = m; $("toast").classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => $("toast").classList.remove("show"), 2200); }
+
+renderPresets(); $("prompt").value = buildPrompt(); renderHistory();
+// Keep polling while the model server is still starting up.
+let connected = false;
+loadDefaults().then(async () => { connected = !!(await checkStatus())?.ok; });
+setInterval(async () => { if (!connected && !controller) connected = !!(await checkStatus())?.ok; }, 5000);
+</script>
+</body>
+</html>
