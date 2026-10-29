@@ -31,7 +31,7 @@ clone ลงเครื่องแล้วดับเบิลคลิก `
 | ระบบ | Windows 10/11 64-bit |
 | การ์ดจอ | NVIDIA + ไดรเวอร์ล่าสุด แนะนำ VRAM 24 GB ขึ้นไป (ดูตารางด้านล่าง) |
 | พื้นที่ดิสก์ | 25–40 GB สำหรับไฟล์โมเดล (เก็บใน `models\` ของโปรเจกต์) |
-| โปรแกรม | [Git](https://git-scm.com/download/win) และ [Python 3.10+](https://www.python.org/downloads/) (ติ๊ก *Add python.exe to PATH*) |
+| โปรแกรม | [Git](https://git-scm.com/download/win) และ [Python 3.10+](https://www.python.org/downloads/windows/) แบบ **64-bit** (*Windows installer (64-bit)*, ติ๊ก *Add python.exe to PATH*) — แบบ 32-bit ก็ใช้ได้ แต่แนะนำ 64-bit |
 
 `start.bat` เลือกไฟล์โมเดลตามการ์ดจออัตโนมัติ:
 

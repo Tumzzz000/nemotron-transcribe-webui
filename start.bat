@@ -22,21 +22,32 @@ echo  ===== Nemotron Transcribe =====
 echo.
 
 rem ---- 1. Python environment for the web UI ----
+rem Prefer a 64-bit Python when one is installed.
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
+py -3-64 -c "pass" >nul 2>nul && set "PY=py -3-64"
+if not defined PY where py >nul 2>nul && set "PY=py -3"
 if not defined PY where python >nul 2>nul && set "PY=python"
 if not defined PY goto no_python
 
-if exist ".venv\Scripts\python.exe" goto venv_ok
+rem Replace an old 32-bit environment once a 64-bit Python is available.
+if not exist ".venv\Scripts\python.exe" goto venv_create
+if not "%PY%"=="py -3-64" goto venv_ok
+".venv\Scripts\python.exe" -c "import struct,sys;sys.exit(struct.calcsize('P')!=8)" >nul 2>nul
+if not errorlevel 1 goto venv_ok
+echo [1/4] Replacing the 32-bit Python environment with a 64-bit one...
+rmdir /s /q .venv
+:venv_create
 echo [1/4] Creating Python environment...
 %PY% -m venv .venv
 if errorlevel 1 goto fail
 :venv_ok
+".venv\Scripts\python.exe" -c "import struct,sys;sys.exit(struct.calcsize('P')!=8)" >nul 2>nul
+if errorlevel 1 echo [1/4] Note: 32-bit Python in use. It works, but 64-bit Python is recommended.
 
 fc /b requirements.txt .venv\installed.txt >nul 2>nul
 if not errorlevel 1 goto deps_ok
 echo [1/4] Installing web UI packages...
-".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
+".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q --only-binary=:all: -r requirements.txt
 if errorlevel 1 goto fail
 copy /y requirements.txt .venv\installed.txt >nul
 :deps_ok

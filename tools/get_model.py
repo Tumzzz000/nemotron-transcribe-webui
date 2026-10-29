@@ -10,13 +10,22 @@ Environment overrides:
   MODEL_FILE    exact decoder file name inside that repo
   MODEL_DIR     where to store models (default: <project>/models)
   HF_TOKEN      Hugging Face token, if the repo asks for one
+  HF_ENDPOINT   Hugging Face server (default https://huggingface.co)
+
+Downloads use plain HTTPS (httpx) instead of huggingface_hub, so nothing has
+to be compiled on install, even on 32-bit or brand-new Python versions.
 """
 
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.parse import quote
+
+import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_DIR = Path(os.environ.get("MODEL_DIR") or ROOT / "models")
@@ -44,16 +53,35 @@ PROFILES = {
 }
 
 ENCODER_GB = 1.7
+HF = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
+HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"} if os.environ.get("HF_TOKEN") else {}
 
 
 def log(msg: str) -> None:
     print(f"  {msg}", flush=True)
 
 
+def find_nvidia_smi() -> str | None:
+    found = shutil.which("nvidia-smi")
+    if found:
+        return found
+    # A 32-bit Python on 64-bit Windows does not see System32 (WOW64 redirection);
+    # Sysnative is the alias that reaches the real one.
+    root = os.environ.get("SystemRoot", r"C:\Windows")
+    for path in (rf"{root}\Sysnative\nvidia-smi.exe", rf"{root}\System32\nvidia-smi.exe",
+                 r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"):
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def detect_gpu() -> dict | None:
+    smi = find_nvidia_smi()
+    if not smi:
+        return None
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,compute_cap", "--format=csv,noheader,nounits"],
+            [smi, "--query-gpu=name,memory.total,compute_cap", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=20,
         ).stdout.strip().splitlines()
     except (OSError, subprocess.SubprocessError):
@@ -70,13 +98,63 @@ def detect_gpu() -> dict | None:
     return max(gpus, key=lambda g: g["vram_gb"]) if gpus else None
 
 
-def list_gguf(api, repo: str) -> dict[str, float]:
+def list_gguf(repo: str) -> dict[str, int]:
+    """Return {path: size in bytes} of the repo's GGUF files."""
+    url = f"{HF}/api/models/{repo}/tree/main"
+    params = {"recursive": "true", "expand": "false"}
     files = {}
-    for item in api.list_repo_tree(repo, recursive=True):
-        size = getattr(item, "size", None)
-        if item.path.lower().endswith(".gguf") and size:
-            files[item.path] = size / 1024**3
+    with httpx.Client(headers=HEADERS, timeout=30, follow_redirects=True) as client:
+        while url:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+            for item in resp.json():
+                size = (item.get("lfs") or {}).get("size") or item.get("size")
+                if item.get("type") == "file" and item["path"].lower().endswith(".gguf") and size:
+                    files[item["path"]] = int(size)
+            url, params = resp.links.get("next", {}).get("url"), None
     return files
+
+
+def download(repo: str, path: str, size: int, dest: Path) -> Path:
+    """Download one file with resume support; skip it when already complete."""
+    if dest.exists() and dest.stat().st_size == size:
+        log(f"{dest.name}: already downloaded.")
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    url = f"{HF}/{repo}/resolve/main/{quote(path)}"
+    for attempt in range(1, 6):
+        have = part.stat().st_size if part.exists() else 0
+        headers = {**HEADERS, **({"Range": f"bytes={have}-"} if have else {})}
+        try:
+            with httpx.stream("GET", url, headers=headers, follow_redirects=True,
+                              timeout=httpx.Timeout(60, connect=30)) as resp:
+                if resp.status_code == 416:  # nothing left to fetch
+                    break
+                resp.raise_for_status()
+                if have and resp.status_code != 206:  # server ignored Range: start over
+                    have = 0
+                with part.open("ab" if have else "wb") as out:
+                    t0, done, last = time.time(), have, 0.0
+                    for chunk in resp.iter_bytes(4 * 1024 * 1024):
+                        out.write(chunk)
+                        done += len(chunk)
+                        now = time.time()
+                        if now - last > 1:
+                            speed = (done - have) / max(now - t0, 1e-6) / 1024**2
+                            print(f"\r  {dest.name}: {done / 1024**3:.2f} / {size / 1024**3:.2f} GB "
+                                  f"({done * 100 / size:.0f}%) {speed:.1f} MB/s   ", end="", flush=True)
+                            last = now
+            print()
+            break
+        except (httpx.HTTPError, OSError) as exc:
+            print()
+            log(f"Download interrupted ({type(exc).__name__}: {str(exc)[:120]}); retry {attempt}/5...")
+            time.sleep(min(30, 3 * attempt))
+    if not part.exists() or part.stat().st_size != size:
+        raise RuntimeError(f"{dest.name} is incomplete. Run start.bat again to resume the download.")
+    part.replace(dest)
+    return dest
 
 
 def is_decoder(path: str) -> bool:
@@ -142,8 +220,6 @@ def main() -> int:
         log(f"Model ready ({SELECTED}).")
         return 0
 
-    from huggingface_hub import HfApi, hf_hub_download
-
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     gpu = detect_gpu()
     if gpu:
@@ -153,10 +229,10 @@ def main() -> int:
     if gpu and gpu["vram_gb"] < 20:
         log("WARNING: this GPU has less than 20 GB of memory; the model may not fit or will be slow.")
 
-    api = HfApi()
     for repo in REPOS:
         try:
-            files = list_gguf(api, repo)
+            sizes = list_gguf(repo)
+            files = {p: b / 1024**3 for p, b in sizes.items()}
         except Exception as exc:  # missing, gated, or offline: try the next source
             log(f"{repo}: not available ({type(exc).__name__}: {str(exc)[:160]})")
             continue
@@ -187,7 +263,7 @@ def main() -> int:
     log(f"Saving to {target} - downloads resume if interrupted.")
     paths = {}
     for name in (encoder, decoder):
-        paths[name] = Path(hf_hub_download(repo, name, local_dir=target))
+        paths[name] = download(repo, name, sizes[name], target / name)
 
     config = write_config(profile)
     write_selected(paths[decoder], paths[encoder], config)
@@ -200,3 +276,6 @@ if __name__ == "__main__":
         sys.exit(main())
     except KeyboardInterrupt:
         sys.exit(130)
+    except RuntimeError as exc:
+        log(f"ERROR: {exc}")
+        sys.exit(1)
