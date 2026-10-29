@@ -22,6 +22,7 @@
     --border: #2a2f37; --accent-soft: #233016; --shadow: none;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.55 "Segoe UI", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif; }
   button, input, select, textarea { font: inherit; color: inherit; }
@@ -140,15 +141,17 @@
       <div style="margin-top:14px">
         <label class="field" for="lang">ภาษาในไฟล์เสียง</label>
         <select id="lang">
-          <option value="">ตรวจจับอัตโนมัติ</option>
-          <option>Thai</option><option>English</option><option>Japanese</option><option>Korean</option>
-          <option>Chinese</option><option>Vietnamese</option><option>Spanish</option><option>French</option>
-          <option>German</option><option>Russian</option><option>Arabic</option><option>Hindi</option>
+          <option value="">ไม่ระบุ (โมเดลไม่ได้ตรวจจับภาษาเอง — แนะนำให้เลือก)</option>
+          <option value="th">ไทย</option><option value="en">อังกฤษ</option><option value="ja">ญี่ปุ่น</option>
+          <option value="ko">เกาหลี</option><option value="zh">จีน</option><option value="vi">เวียดนาม</option>
+          <option value="id">อินโดนีเซีย</option><option value="hi">ฮินดี</option><option value="es">สเปน</option>
+          <option value="fr">ฝรั่งเศส</option><option value="de">เยอรมัน</option><option value="ru">รัสเซีย</option>
+          <option value="ar">อาหรับ</option>
         </select>
       </div>
       <div style="margin-top:14px">
         <label class="field" for="prompt">Prompt ที่จะส่งให้โมเดล (แก้ได้)</label>
-        <textarea id="prompt"></textarea>
+        <textarea id="prompt" placeholder="ว่างไว้ = ใช้ prompt มาตรฐานของ NVIDIA สำหรับถอดเสียงตามภาษาที่เลือก"></textarea>
       </div>
       <div style="margin-top:16px" class="row">
         <button class="btn primary wide" id="runBtn" disabled>เริ่มประมวลผล</button>
@@ -164,6 +167,7 @@
         <div class="spacer"></div>
         <button class="btn" id="copyBtn" disabled>คัดลอก</button>
         <button class="btn" id="saveBtn" disabled>บันทึก .txt</button>
+        <button class="btn" id="srtBtn" hidden>บันทึก .srt</button>
       </div>
       <details class="reason" id="reasonBox" hidden><summary>ความคิดของโมเดล (reasoning)</summary><pre id="reasonText"></pre></details>
       <div id="output" class="empty">เลือกไฟล์เสียง แล้วกด “เริ่มประมวลผล”</div>
@@ -180,7 +184,7 @@
     <div class="dlg-body">
       <h2 style="margin:0;font-size:17px">ตั้งค่า</h2>
       <div>
-        <label class="field" for="sUrl">ที่อยู่ vLLM server</label>
+        <label class="field" for="sUrl">ที่อยู่ model server (NeMo-Speech.cpp หรือ vLLM)</label>
         <input type="text" id="sUrl" placeholder="http://localhost:8000">
       </div>
       <div>
@@ -190,10 +194,10 @@
       </div>
       <div class="grid2">
         <div><label class="field" for="sTemp">Temperature</label><input type="number" id="sTemp" min="0" max="2" step="0.1"></div>
-        <div><label class="field" for="sMax">Max tokens</label><input type="number" id="sMax" min="256" max="65536" step="256"></div>
+        <div><label class="field" for="sMax">Max tokens (เฉพาะ vLLM)</label><input type="number" id="sMax" min="256" max="65536" step="256"></div>
       </div>
       <div>
-        <label class="field" for="sSystem">System prompt (ไม่บังคับ)</label>
+        <label class="field" for="sSystem">System prompt (เฉพาะ vLLM, ไม่บังคับ)</label>
         <textarea id="sSystem" style="min-height:60px"></textarea>
       </div>
       <label class="check"><input type="checkbox" id="sReason"> แสดง reasoning ของโมเดล (ถ้ามี)</label>
@@ -223,11 +227,13 @@ $("themeBtn").onclick = () => {
 };
 
 // ---------- settings ----------
-let settings = { vllm_url: "", model: "", temperature: 0, max_tokens: 16384, system: "", show_reasoning: false, ...store.get("settings", {}) };
+let settings = { server_url: "", model: "", temperature: 0, max_tokens: 16384, system: "", show_reasoning: false, ...store.get("settings", {}) };
+if (!settings.server_url && settings.vllm_url) settings.server_url = settings.vllm_url;
+const KIND_LABEL = { "nemo-speech": "NeMo-Speech", vllm: "vLLM" };
 async function loadDefaults() {
   try {
     const cfg = await (await fetch("/api/config")).json();
-    if (!settings.vllm_url) settings.vllm_url = cfg.vllm_url;
+    if (!settings.server_url) settings.server_url = cfg.server_url;
     if (!settings.model && cfg.model) settings.model = cfg.model;
   } catch {}
 }
@@ -235,14 +241,14 @@ async function loadDefaults() {
 async function checkStatus() {
   $("statusDot").className = "dot"; $("statusText").textContent = "กำลังตรวจสอบ…";
   try {
-    const r = await (await fetch("/api/status?vllm_url=" + encodeURIComponent(settings.vllm_url))).json();
+    const r = await (await fetch("/api/status?server_url=" + encodeURIComponent(settings.server_url))).json();
     if (r.ok) {
       $("statusDot").className = "dot ok";
       const m = settings.model || r.models[0] || "ไม่มีโมเดล";
-      $("statusText").textContent = "เชื่อมต่อแล้ว · " + m.split("/").pop();
+      $("statusText").textContent = (KIND_LABEL[r.kind] || "เชื่อมต่อแล้ว") + " · " + m.split(/[\\/]/).pop();
       fillModels(r.models);
     } else {
-      $("statusDot").className = "dot bad"; $("statusText").textContent = "รอ vLLM server…";
+      $("statusDot").className = "dot bad"; $("statusText").textContent = "รอ model server…";
       $("statusBtn").title = r.error;
     }
     return r;
@@ -258,35 +264,45 @@ function fillModels(models) {
 }
 $("statusBtn").onclick = checkStatus;
 $("settingsBtn").onclick = () => {
-  $("sUrl").value = settings.vllm_url; $("sTemp").value = settings.temperature; $("sMax").value = settings.max_tokens;
+  $("sUrl").value = settings.server_url; $("sTemp").value = settings.temperature; $("sMax").value = settings.max_tokens;
   $("sSystem").value = settings.system; $("sReason").checked = settings.show_reasoning; $("sModel").value = settings.model;
   $("settings").showModal();
 };
 $("sRefresh").onclick = async () => {
-  const r = await (await fetch("/api/status?vllm_url=" + encodeURIComponent($("sUrl").value))).json();
+  const r = await (await fetch("/api/status?server_url=" + encodeURIComponent($("sUrl").value))).json();
   if (r.ok) { fillModels(r.models); toast("พบ " + r.models.length + " โมเดล"); } else toast("เชื่อมต่อไม่ได้: " + r.error);
 };
 $("settings").addEventListener("close", () => {
   if ($("settings").returnValue !== "ok") return;
-  settings = { vllm_url: $("sUrl").value.trim() || "http://localhost:8000", model: $("sModel").value,
+  settings = { server_url: $("sUrl").value.trim() || "http://localhost:8000", model: $("sModel").value,
     temperature: parseFloat($("sTemp").value) || 0, max_tokens: parseInt($("sMax").value) || 16384,
     system: $("sSystem").value, show_reasoning: $("sReason").checked };
   store.set("settings", settings); checkStatus().then(r => { connected = !!r?.ok; });
 });
 
 // ---------- presets ----------
+// Prompts follow NeMo-Speech.cpp docs/salm/prompts.md. An empty prompt lets the server
+// use NVIDIA's default transcription prompt for the selected language. A custom
+// instruction is used as written, so presets that have one name the language (addLang).
+const SPEAKER_PROMPT = "Transcribe this audio. Include all spoken words and verbal fillers. Write numbers as spoken. " +
+  "Use no punctuation and no capitalization. Start every speaker turn with a speaker tag such as <spk:0>, <spk:1>, <spk:2>, etc.; " +
+  "assign one stable tag per speaker and keep speaker identities consistent. Output only the speaker-tagged transcript.";
 const PRESETS = [
-  { id: "plain", label: "ถอดเสียง", prompt: "Transcribe the audio." },
-  { id: "speakers", label: "ถอดเสียง + แยกผู้พูด", prompt: "Transcribe the audio with speaker labels." },
-  { id: "timestamps", label: "ถอดเสียง + เวลา", prompt: "Transcribe the audio with timestamps." },
+  { id: "plain", label: "ถอดเสียง", prompt: "" },
+  { id: "timestamps", label: "ถอดเสียง + เวลา (ซับไตเติล)", prompt: "", timestamps: true },
+  { id: "speakers", label: "แยกผู้พูด", prompt: SPEAKER_PROMPT, addLang: true },
+  { id: "readable", label: "ถอดแบบอ่านง่าย", prompt: "Create a readable transcript of this recording with punctuation. Omit verbal fillers and accidental repetitions, but retain the remaining wording and meaning. Return only the transcript.", addLang: true },
+  { id: "translate", label: "แปลเป็นไทย", prompt: "Translate the speech into Thai." },
   { id: "summary", label: "สรุปเนื้อหา", prompt: "Summarize the content of this audio in Thai." },
-  { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "Based on the audio, answer: " },
+  { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "Based on the audio, answer in Thai: " },
 ];
+const LANG_NAMES = { th: "Thai", en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese", vi: "Vietnamese",
+  id: "Indonesian", hi: "Hindi", es: "Spanish", fr: "French", de: "German", ru: "Russian", ar: "Arabic" };
 let preset = store.get("preset", "plain");
+const currentPreset = () => PRESETS.find(x => x.id === preset) || PRESETS[0];
 function buildPrompt() {
-  const p = PRESETS.find(x => x.id === preset) || PRESETS[0];
-  const lang = $("lang").value;
-  return p.prompt + (lang && p.id !== "qa" ? ` The audio is in ${lang}.` : "");
+  const p = currentPreset(); const lang = $("lang").value;
+  return p.prompt + (p.prompt && p.addLang && lang ? ` The speech is in ${LANG_NAMES[lang]}.` : "");
 }
 function renderPresets() {
   $("presets").innerHTML = "";
@@ -298,7 +314,8 @@ function renderPresets() {
     $("presets").appendChild(b);
   }
 }
-$("lang").value = store.get("lang", "");
+$("lang").value = store.get("lang", "th");
+if ($("lang").selectedIndex < 0) $("lang").value = "th";
 $("lang").onchange = () => { store.set("lang", $("lang").value); $("prompt").value = buildPrompt(); };
 
 // ---------- audio input ----------
@@ -341,7 +358,26 @@ $("recBtn").onclick = async () => {
 };
 
 // ---------- run ----------
-let controller = null, resultText = "", lastName = "transcript";
+let controller = null, resultText = "", srtText = "", lastName = "transcript";
+// "<spk:0> hello <spk:1> hi" -> one line per speaker turn.
+function prettify(t) {
+  return t.replace(/\s*<spk:(\d+)>\s*/g, (m, n, off) => (off ? "\n\n" : "") + `[ผู้พูด ${+n + 1}] `);
+}
+function clock(sec, srt) {
+  const ms = Math.round(sec * 1000), h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000),
+    s = Math.floor(ms % 60000 / 1000), p = (v, n = 2) => String(v).padStart(n, "0");
+  return srt ? `${p(h)}:${p(m)}:${p(s)},${p(ms % 1000, 3)}` : (h ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`);
+}
+// Build a timestamped transcript and SRT from the server's subtitle cues.
+function fromCues(tr) {
+  const lines = [], srt = [];
+  tr.subtitle_cues.forEach((c, i) => {
+    const spk = tr.words?.[c.first_word]?.speaker; const who = spk ? `ผู้พูด ${+String(spk).replace(/\D/g, "") + 1}: ` : "";
+    lines.push(`[${clock(c.start)}] ${who}${c.text}`);
+    srt.push(`${i + 1}\n${clock(c.start, true)} --> ${clock(c.end, true)}\n${who}${c.text}\n`);
+  });
+  return { text: lines.join("\n"), srt: srt.join("\n") };
+}
 function setOutput(text, isErr) {
   const o = $("output"); o.classList.toggle("empty", !text && !isErr);
   if (isErr) { o.innerHTML = ""; const d = document.createElement("div"); d.className = "err"; d.textContent = text; o.appendChild(d); }
@@ -359,11 +395,13 @@ $("runBtn").onclick = async () => {
   if (!audioFile) return;
   const fd = new FormData();
   fd.append("file", audioFile, audioFile.name);
-  fd.append("prompt", $("prompt").value.trim() || "Transcribe the audio.");
-  fd.append("system", settings.system); fd.append("vllm_url", settings.vllm_url); fd.append("model", settings.model);
+  fd.append("prompt", $("prompt").value.trim()); fd.append("language", $("lang").value);
+  fd.append("timestamps", currentPreset().timestamps ? "true" : "false");
+  fd.append("system", settings.system); fd.append("server_url", settings.server_url); fd.append("model", settings.model);
   fd.append("temperature", settings.temperature); fd.append("max_tokens", settings.max_tokens);
 
-  controller = new AbortController(); resultText = ""; let reasoning = ""; let errored = false;
+  controller = new AbortController(); resultText = ""; srtText = ""; let raw = "", reasoning = "", errored = false;
+  $("srtBtn").hidden = true;
   lastName = audioFile.name.replace(/\.[^.]+$/, "");
   const st = { duration: 0, elapsed: null, done: false }; const t0 = performance.now();
   $("runBtn").innerHTML = '<span class="spinner"></span> กำลังประมวลผล… (คลิกเพื่อหยุด)';
@@ -390,7 +428,9 @@ $("runBtn").onclick = async () => {
         const delta = msg.choices?.[0]?.delta || {};
         const r = delta.reasoning_content ?? delta.reasoning;
         if (r) { reasoning += r; if (settings.show_reasoning) { $("reasonBox").hidden = false; $("reasonText").textContent = reasoning; } }
-        if (delta.content) { resultText += delta.content; setOutput(resultText); $("output").scrollTop = $("output").scrollHeight; }
+        if (delta.content) { raw += delta.content; resultText = prettify(raw); setOutput(resultText); $("output").scrollTop = $("output").scrollHeight; }
+        const tr = msg.transcription || msg.choices?.[0]?.transcription || msg.choices?.[0]?.delta?.transcription;
+        if (tr?.subtitle_cues?.length) { const t = fromCues(tr); resultText = t.text; srtText = t.srt; setOutput(resultText); }
       }
     }
     if (!resultText) setOutput(reasoning ? "(โมเดลไม่ได้ตอบเนื้อหา — ลองเปิดดู reasoning ในตั้งค่า)" : "(ไม่มีผลลัพธ์)");
@@ -401,7 +441,7 @@ $("runBtn").onclick = async () => {
   } finally {
     clearInterval(tick); st.elapsed = (performance.now() - t0) / 1000; st.done = !errored; renderStats(st);
     controller = null; $("runBtn").textContent = "เริ่มประมวลผล";
-    $("copyBtn").disabled = $("saveBtn").disabled = !resultText;
+    $("copyBtn").disabled = $("saveBtn").disabled = !resultText; $("srtBtn").hidden = !srtText;
     if (resultText) addHistory({ name: audioFile?.name || lastName, text: resultText, at: Date.now() });
   }
 };
@@ -411,6 +451,12 @@ $("saveBtn").onclick = () => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([resultText], { type: "text/plain;charset=utf-8" }));
   a.download = lastName + ".txt"; a.click(); URL.revokeObjectURL(a.href);
+};
+
+$("srtBtn").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([srtText], { type: "application/x-subrip;charset=utf-8" }));
+  a.download = lastName + ".srt"; a.click(); URL.revokeObjectURL(a.href);
 };
 
 // ---------- history (this browser only) ----------
@@ -423,7 +469,7 @@ function renderHistory() {
     const s = document.createElement("span"); s.textContent = h.name + " — " + h.text.slice(0, 120);
     const t = document.createElement("time"); t.textContent = new Date(h.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
     li.append(s, t);
-    li.onclick = () => { resultText = h.text; lastName = h.name.replace(/\.[^.]+$/, ""); setOutput(h.text); $("stats").innerHTML = "";
+    li.onclick = () => { resultText = h.text; srtText = ""; $("srtBtn").hidden = true; lastName = h.name.replace(/\.[^.]+$/, ""); setOutput(h.text); $("stats").innerHTML = "";
       $("copyBtn").disabled = $("saveBtn").disabled = false; };
     $("historyList").appendChild(li);
   });

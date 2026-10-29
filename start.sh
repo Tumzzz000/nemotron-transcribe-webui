@@ -3,9 +3,9 @@
 set -e
 cd "$(dirname "$0")"
 
-export VLLM_URL="${VLLM_URL:-http://localhost:8000}"
+export MODEL_URL="${MODEL_URL:-${VLLM_URL:-http://localhost:8000}}"
 export WEBUI_PORT="${WEBUI_PORT:-8090}"
-export VLLM_MODEL="${VLLM_MODEL:-}"
+export MODEL_NAME="${MODEL_NAME:-${VLLM_MODEL:-}}"
 
 if [ ! -x .venv/bin/python ]; then
   echo "Creating virtual environment..."

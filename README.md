@@ -1,7 +1,7 @@
 # Nemotron Transcribe Web UI
 
-หน้าเว็บสำหรับถอดเสียงด้วย **NVIDIA Nemotron 3.5 Transcribe** บนเครื่องตัวเอง
-clone ลงเครื่องแล้วดับเบิลคลิก `start.bat` ไฟล์เดียว ระบบจะติดตั้งทุกอย่าง รันโมเดล
+หน้าเว็บสำหรับถอดเสียงด้วย **NVIDIA Nemotron 3.5 Transcribe** บนเครื่องตัวเอง — **รันบน Windows ได้เลย ไม่ต้องใช้ WSL**
+clone ลงเครื่องแล้วดับเบิลคลิก `start.bat` ไฟล์เดียว ระบบจะติดตั้งตัวรันโมเดล ดาวน์โหลดโมเดลที่เหมาะกับการ์ดจอ
 แล้วเปิดหน้าเว็บที่ **http://localhost:8090** ให้เอง
 
 ![screenshot](docs/screenshot.png)
@@ -9,26 +9,38 @@ clone ลงเครื่องแล้วดับเบิลคลิก `
 ## ความสามารถ
 
 - อัปโหลดหรือลากไฟล์เสียง/วิดีโอมาวาง (mp3, wav, m4a, flac, mp4 …) ยาวสูงสุดประมาณ 1 ชั่วโมง หรืออัดจากไมค์
-- เลือกงาน: ถอดเสียง / แยกผู้พูด / มีเวลากำกับ / สรุปเนื้อหา / ถามคำถามเกี่ยวกับเสียง — แก้ prompt เองได้
-- ข้อความขึ้นแบบ real-time พร้อมบอกความเร็วเทียบเวลาจริง
-- คัดลอก / บันทึกเป็น `.txt` / เก็บประวัติในเบราว์เซอร์ / โหมดมืด / ใช้บนมือถือในวง LAN ได้
+- ถอดเสียง / **มีเวลากำกับ + ส่งออกซับไตเติล .srt** / แยกผู้พูด / ถอดแบบอ่านง่าย / แปลเป็นไทย / สรุป / ถามคำถามเกี่ยวกับเสียง
+- รองรับภาษาไทย (ตามเอกสารของ NVIDIA) — เลือกภาษาในไฟล์ได้ เพราะโมเดลไม่ได้ตรวจจับภาษาเอง
+- ข้อความขึ้นแบบ real-time, คัดลอก / บันทึก `.txt`, เก็บประวัติในเบราว์เซอร์, โหมดมืด, ใช้บนมือถือในวง LAN ได้
 - ทุกอย่างรันในเครื่อง ไฟล์เสียงไม่ถูกส่งออกนอกเครื่อง
 - ใช้พอร์ต 8090 จึงเปิดพร้อม Open WebUI (8080) ได้
+
+## ทำงานยังไง
+
+```
+เบราว์เซอร์ ──► Web UI (พอร์ต 8090) ──► NVIDIA NeMo-Speech.cpp + โมเดล GGUF (พอร์ต 8000)
+```
+
+ตัวรันโมเดลคือ [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) ของ NVIDIA ซึ่งเป็นโปรแกรม C++ ที่รันบน Windows โดยตรง
+และรองรับ Nemotron 3.5 Transcribe ในรูปแบบไฟล์ GGUF
 
 ## สิ่งที่ต้องมี
 
 | | |
 |---|---|
-| ระบบ | Windows 10/11 ที่มี **WSL2 + Ubuntu** หรือ Linux |
-| การ์ดจอ | NVIDIA, VRAM แนะนำ 32 GB ขึ้นไป — Blackwell (RTX 50xx, RTX PRO 6000) ใช้รุ่น NVFP4, รุ่นเก่ากว่าระบบจะเลือก FP8/BF16 ให้ (ใช้ VRAM มากกว่า) |
-| พื้นที่ดิสก์ | ประมาณ 40 GB ขึ้นไป (vLLM + ตัวโมเดล) |
-| โปรแกรม | [Git](https://git-scm.com/download/win), [Python 3.10+](https://www.python.org/downloads/) (ติ๊ก *Add python.exe to PATH*), ไดรเวอร์ NVIDIA ล่าสุด |
+| ระบบ | Windows 10/11 64-bit |
+| การ์ดจอ | NVIDIA + ไดรเวอร์ล่าสุด แนะนำ VRAM 24 GB ขึ้นไป (ดูตารางด้านล่าง) |
+| พื้นที่ดิสก์ | 25–40 GB สำหรับไฟล์โมเดล (เก็บใน `models\` ของโปรเจกต์) |
+| โปรแกรม | [Git](https://git-scm.com/download/win) และ [Python 3.10+](https://www.python.org/downloads/) (ติ๊ก *Add python.exe to PATH*) |
 
-ถ้ายังไม่มี WSL ให้เปิด PowerShell แบบ Administrator แล้วรันครั้งเดียว จากนั้นรีสตาร์ทเครื่อง:
+`start.bat` เลือกไฟล์โมเดลตามการ์ดจออัตโนมัติ:
 
-```powershell
-wsl --install -d Ubuntu
-```
+| การ์ดจอ | ไฟล์ที่เลือก | ยาวสุดต่อไฟล์ |
+|---|---|---|
+| RTX 50xx / RTX PRO (Blackwell) 32 GB ขึ้นไป | NVFP4 (เร็วที่สุด) | 1 ชั่วโมง |
+| 32–48 GB รุ่นอื่น | รุ่นที่ใหญ่ที่สุดที่ลงได้ (Q5/Q8) | 1 ชั่วโมง |
+| 24 GB (เช่น RTX 3090/4090) | IQ4_NL + ตั้งค่าประหยัดหน่วยความจำ | ประมาณ 29 นาที |
+| ต่ำกว่า 20 GB หรือไม่มีการ์ด NVIDIA | IQ4_NL (อาจไม่พอ หรือช้ามาก) | — |
 
 ## เริ่มใช้งาน
 
@@ -42,14 +54,15 @@ start.bat
 
 `start.bat` จะทำตามลำดับ:
 
-1. สร้าง Python environment และติดตั้งแพ็กเกจของหน้าเว็บ (ครั้งแรกครั้งเดียว)
-2. ถ้ายังไม่มี vLLM server ทำงานอยู่ จะเปิดหน้าต่างใหม่แล้วรันใน WSL:
-   - **ครั้งแรก:** ติดตั้ง vLLM 0.32.0 + NeMo Speech และดาวน์โหลดโมเดล (~22 GB สำหรับ NVFP4) — ใช้เวลา 30 นาทีขึ้นไปขึ้นกับเน็ต
-     ระหว่างติดตั้งอาจถามรหัสผ่าน Ubuntu (เพื่อติดตั้ง git/curl)
-   - **ครั้งต่อไป:** โหลดโมเดลเข้าการ์ดจอ ใช้เวลาไม่กี่นาที
-3. เปิดหน้าเว็บ http://localhost:8090 — ไฟมุมขวาบนจะเป็นสีเขียวเมื่อโมเดลพร้อม (หน้าเว็บตรวจให้อัตโนมัติทุก 5 วินาที)
+1. สร้าง Python environment และติดตั้งแพ็กเกจของหน้าเว็บ
+2. ติดตั้ง NeMo-Speech.cpp ด้วยตัวติดตั้งทางการของ NVIDIA ไปที่ `%LOCALAPPDATA%\Programs\NeMoSpeech`
+3. ดาวน์โหลดไฟล์โมเดล (ครั้งแรก 20–35 GB, ถ้าเน็ตหลุดรันใหม่จะโหลดต่อจากเดิม)
+   แล้วเปิดหน้าต่าง **Nemotron model server** — รอโหลดโมเดลเข้าการ์ดจอสักครู่
+4. เปิดหน้าเว็บ http://localhost:8090 — ไฟมุมขวาบนเป็นสีเขียวเมื่อโมเดลพร้อม (หน้าเว็บตรวจให้เองทุก 5 วินาที)
 
-ปิดใช้งาน: ปิดหน้าต่าง **Nemotron vLLM server** และหน้าต่าง **Nemotron Transcribe**
+ข้อ 1–3 ทำแค่ครั้งแรก ครั้งต่อไปเปิดได้ภายในไม่กี่นาที
+
+ปิดใช้งาน: ปิดหน้าต่าง **Nemotron model server** และ **Nemotron Transcribe**
 
 อัปเดตเวอร์ชันใหม่:
 
@@ -59,87 +72,65 @@ git pull
 
 ## การตั้งค่า
 
-คัดลอก `config.example.bat` เป็น `config.local.bat` แล้วแก้ค่าในนั้น (ไฟล์นี้ไม่ถูก git track จึงไม่หายตอน `git pull`)
+คัดลอก `config.example.bat` เป็น `config.local.bat` แล้วแก้ค่า (ไฟล์นี้ไม่ถูก git track จึงไม่หายตอน `git pull`)
 
 | ตัวแปร | ค่าเริ่มต้น | ความหมาย |
 |---|---|---|
-| `WEBUI_PORT` | `8090` | พอร์ตของหน้าเว็บ |
-| `VLLM_URL` | `http://localhost:8000` | ที่อยู่ vLLM server |
-| `START_SERVER` | `1` | `0` = เปิดแค่หน้าเว็บ ใช้กับ vLLM server ที่รันอยู่เครื่องอื่น |
-| `MODEL_VARIANT` | ว่าง (เลือกตามการ์ดจอ) | บังคับใช้ `NVFP4`, `FP8` หรือ `BF16` |
-| `EXTRA_VLLM_ARGS` | ว่าง | flag เพิ่มเติมของ `vllm serve` |
+| `WEBUI_PORT` | `8090` | พอร์ตหน้าเว็บ |
+| `MODEL_PORT` | `8000` | พอร์ตของ model server |
+| `MODEL_URL` | `http://localhost:8000` | ใช้ model server ที่รันอยู่เครื่องอื่น |
+| `START_SERVER` | `1` | `0` = เปิดแค่หน้าเว็บ |
+| `MODEL_DIR` | `models\` ในโปรเจกต์ | ที่เก็บไฟล์โมเดล |
+| `GGUF_REPO`, `MODEL_FILE` | เลือกให้อัตโนมัติ | เลือก repo / ไฟล์โมเดลเอง |
 | `HF_TOKEN` | — | token ของ Hugging Face ถ้าการดาวน์โหลดขอ |
-| `HOST` | `127.0.0.1` | ตั้ง `0.0.0.0` เพื่อให้มือถือ/เครื่องอื่นในวง LAN เปิดหน้าเว็บได้ |
+| `NS_CHANNEL` | `stable` | `nightly` = ใช้ NeMo-Speech.cpp รุ่นล่าสุด |
+| `HOST` | `127.0.0.1` | `0.0.0.0` = ให้มือถือ/เครื่องอื่นในวง LAN เปิดหน้าเว็บได้ |
+| `BACKEND` | `nemo` | `vllm` = ใช้ vLLM ใน WSL2 แทน (ดูด้านล่าง) |
 
-ในหน้าเว็บ (ปุ่มฟันเฟือง) ตั้ง temperature, max tokens, system prompt และดู reasoning ของโมเดลได้
+ถ้าอยากเปลี่ยนไฟล์โมเดล ให้ลบ `models\selected.bat` แล้วรัน `start.bat` ใหม่
 
-## Linux
+## ทางเลือก: vLLM ใน WSL2 / Linux
+
+สำหรับเครื่องที่อยากใช้ checkpoint ต้นฉบับจาก Hugging Face (BF16/FP8/NVFP4) ผ่าน vLLM:
+ตั้ง `BACKEND=vllm` ใน `config.local.bat` (ต้องมี WSL2 + Ubuntu) หรือบน Linux:
 
 ```bash
-./server/start-vllm.sh   # หน้าต่างที่ 1: ติดตั้ง (ครั้งแรก) และรันโมเดล
+./server/start-vllm.sh   # หน้าต่างที่ 1: ติดตั้ง vLLM (ครั้งแรก) และรันโมเดล
 ./start.sh               # หน้าต่างที่ 2: หน้าเว็บที่ http://localhost:8090
 ```
+
+### WSL troubleshooting
+
+ถ้า WSL ขึ้น `WSL installation appears to be corrupted (... REGDB_E_CLASSNOTREG)` ให้เปิด PowerShell แบบ Administrator:
+
+1. `wsl --update --web-download` แล้วรีสตาร์ทเครื่อง
+2. ถ้ายังไม่หาย: `dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart`
+   และ `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart` แล้วรีสตาร์ท
+3. ถ้ายังไม่หาย: ถอน *Windows Subsystem for Linux* ใน Settings → Apps แล้วติดตั้งจาก https://github.com/microsoft/WSL/releases
+4. ติดตั้ง Ubuntu: `wsl --install -d Ubuntu` แล้วตรวจด้วย `wsl -e echo ok` และ `wsl -e nvidia-smi`
 
 ## โครงสร้างโปรเจกต์
 
 ```
 start.bat              ตัวเริ่มทุกอย่างบน Windows
-start.sh               เปิดหน้าเว็บบน Linux/macOS
 config.example.bat     ตัวอย่างการตั้งค่า
-app.py                 web server (FastAPI) — แปลงเสียงเป็น WAV 16 kHz แล้วส่งต่อให้ vLLM
+app.py                 web server (FastAPI): แปลงเสียงเป็น WAV 16 kHz แล้วส่งต่อให้ model server
 static/index.html      หน้าเว็บ
-server/setup.sh        ติดตั้ง vLLM + NeMo Speech ใน ~/.nemotron-transcribe
-server/start-vllm.sh   เลือก checkpoint ตามการ์ดจอ ดาวน์โหลด และรัน vllm serve
+tools/get_model.py     ตรวจการ์ดจอ เลือกและดาวน์โหลดไฟล์ GGUF, เขียนค่าตั้งของ server
+server/                สคริปต์ vLLM สำหรับ WSL2/Linux (ทางเลือก)
+start.sh               เปิดหน้าเว็บบน Linux/macOS
 ```
-
-## WSL troubleshooting
-
-ถ้า `start.bat` ขึ้นว่า WSL ใช้ไม่ได้ หรือหน้าต่าง vLLM ขึ้น
-`WSL installation appears to be corrupted (Error code: Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG)`
-ให้แก้ตามลำดับ (เปิด PowerShell แบบ **Run as administrator**):
-
-1. อัปเดต / ซ่อม WSL แล้วรีสตาร์ทเครื่อง
-
-   ```powershell
-   wsl --update --web-download
-   ```
-
-2. ถ้ายังไม่หาย เปิดฟีเจอร์ของ Windows ที่ WSL ต้องใช้ แล้วรีสตาร์ทเครื่อง
-
-   ```powershell
-   dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-   ```
-
-   ```powershell
-   dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
-   ```
-
-3. ถ้ายังไม่หาย ถอน **Windows Subsystem for Linux** ออกจาก *Settings → Apps → Installed apps*
-   แล้วติดตั้งใหม่จากไฟล์ `.msi` ล่าสุดที่ https://github.com/microsoft/WSL/releases แล้วรีสตาร์ทเครื่อง
-
-4. ติดตั้ง Ubuntu แล้วตั้งชื่อผู้ใช้/รหัสผ่านตามที่ถาม
-
-   ```powershell
-   wsl --install -d Ubuntu
-   ```
-
-5. ตรวจว่าใช้ได้: `wsl -e echo ok` ต้องตอบ `ok` และ `wsl -e nvidia-smi` ต้องเห็นการ์ดจอ
-   จากนั้นรัน `start.bat` ใหม่
-
-ต้องเปิด Virtualization (Intel VT-x / AMD-V หรือ SVM) ใน BIOS ด้วย เช็คได้ที่ Task Manager → Performance → CPU → *Virtualization: Enabled*
 
 ## ข้อจำกัดที่ควรรู้
 
-- คำสั่งติดตั้งและ flag ของ `vllm serve` อ้างอิงจากข้อมูลที่ NVIDIA ประกาศตอนเปิดตัว (ต.ค. 2026)
-  ถ้าเจอ error ให้เทียบกับหัวข้อ Environment Setup / Quick Start ใน
-  [model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4)
-  และใส่ flag ที่ขาด (เช่น MTP speculative decoding, timestamp middleware) ใน `EXTRA_VLLM_ARGS`
-- Prompt สำเร็จรูปเป็นค่าเริ่มต้นทั่วไป รูปแบบ prompt ที่โมเดลเข้าใจดีที่สุดดูได้จาก model card
-  แก้ได้ที่ `PRESETS` ใน `static/index.html`
-- ยังไม่ได้ยืนยันว่าโมเดลรองรับภาษาไทยในระดับไหน
-- Kernel แบบ quantized บางตัวอาจต้องใช้ CUDA 13 toolkit (`nvcc`) ใน WSL ตามที่ model card ระบุ
+- ทดสอบหน้าเว็บกับ server จำลองตามเอกสาร API ของ NeMo-Speech.cpp แล้ว แต่ยังไม่ได้ทดสอบกับโมเดลจริงบนทุกการ์ดจอ
+- ไฟล์โมเดลดาวน์โหลดจาก repo GGUF ทางการของ NVIDIA ถ้ามี ไม่งั้นใช้ repo ที่ชุมชนแปลงไว้
+  (`AtomicChat/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-GGUF`) — เปลี่ยนได้ด้วย `GGUF_REPO`
+- Prompt ของแต่ละปุ่มอิงจาก [เอกสาร prompt ของ NVIDIA](https://github.com/NVIDIA/NeMo-Speech.cpp/blob/main/docs/salm/prompts.md)
+  แก้ได้ในช่อง Prompt หรือที่ `PRESETS` ใน `static/index.html`
 
 ## เครดิต
 
-โมเดล [NVIDIA Nemotron 3.5 Transcribe](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B)
-อยู่ภายใต้ OpenMDW-1.1 license ของ NVIDIA — โปรเจกต์นี้เป็นแค่หน้าเว็บสำหรับเรียกใช้ ไม่ได้มาจาก NVIDIA
+โมเดล [NVIDIA Nemotron 3.5 Transcribe](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B) (OpenMDW-1.1)
+และ [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) (Apache-2.0) เป็นของ NVIDIA —
+โปรเจกต์นี้เป็นแค่หน้าเว็บและตัวติดตั้งสำหรับเรียกใช้ ไม่ได้มาจาก NVIDIA

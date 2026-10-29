@@ -2,26 +2,38 @@
 rem Copy this file to config.local.bat and edit it. config.local.bat is not
 rem tracked by git, so `git pull` will never overwrite your settings.
 
-rem Address of the vLLM server
-set "VLLM_URL=http://localhost:8000"
-
 rem Port of the web UI (Open WebUI uses 8080)
 set "WEBUI_PORT=8090"
 
-rem Model name; empty = first model the server has loaded
-set "VLLM_MODEL="
+rem Port of the model server started by start.bat
+set "MODEL_PORT=8000"
 
-rem 1 = start.bat also starts the vLLM server in WSL2, 0 = only the web UI
+rem Use a model server that runs elsewhere, e.g. another PC on your LAN
+rem set "MODEL_URL=http://192.168.1.50:8000"
+
+rem 1 = start.bat also starts the model server, 0 = only the web UI
 set "START_SERVER=1"
 
-rem Checkpoint: empty = pick from the GPU, or NVFP4 / FP8 / BF16
-set "MODEL_VARIANT="
+rem nemo = NVIDIA NeMo-Speech.cpp, native Windows (default)
+rem vllm = vLLM inside WSL2 (needs Ubuntu in WSL)
+set "BACKEND=nemo"
 
-rem Extra flags for `vllm serve`, e.g. from the model card's Quick Start
-set "EXTRA_VLLM_ARGS="
+rem NeMo-Speech.cpp release channel: stable or nightly
+set "NS_CHANNEL=stable"
+
+rem Where model files are stored (20-35 GB)
+rem set "MODEL_DIR=D:\models\nemotron"
+
+rem Pick the GGUF yourself instead of by GPU (file name inside GGUF_REPO)
+rem set "GGUF_REPO=nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-GGUF"
+rem set "MODEL_FILE=NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-AD-IQ4_NL.gguf"
 
 rem Hugging Face token, only needed if the download asks for one
 rem set "HF_TOKEN=hf_xxx"
 
 rem Let other PCs on your LAN open the web UI
 rem set "HOST=0.0.0.0"
+
+rem BACKEND=vllm only: NVFP4 / FP8 / BF16 and extra `vllm serve` flags
+set "MODEL_VARIANT="
+set "EXTRA_VLLM_ARGS="
