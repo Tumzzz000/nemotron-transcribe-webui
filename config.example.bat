@@ -39,5 +39,7 @@ rem BACKEND=vllm only: NVFP4 / FP8 / BF16 and extra `vllm serve` flags
 set "MODEL_VARIANT="
 set "EXTRA_VLLM_ARGS="
 
-rem Force where the model runs: cpu, cuda:0 ... (default: picked by start.bat)
-rem set "DEVICE=cpu"
+rem Force where the model runs: cpu, or cuda:0 for the first GPU (default: picked by start.bat).
+rem cuda:0 on a GPU smaller than the model relies on the NVIDIA driver spilling into
+rem system RAM ("CUDA - Sysmem Fallback Policy"); see README.md.
+rem set "DEVICE=cuda:0"

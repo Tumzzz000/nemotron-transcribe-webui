@@ -45,11 +45,16 @@ clone ลงเครื่องแล้วดับเบิลคลิก `
 ### การ์ดจอเล็กกว่า 24 GB
 
 โมเดลนี้ (30B) ไฟล์เล็กที่สุดคือ IQ4_NL ประมาณ 19 GB + encoder 1.7 GB + หน่วยความจำทำงาน — **ใส่การ์ด 16 GB ไม่ได้**
-และ NeMo-Speech.cpp ยังไม่มีโหมดแบ่งโมเดลครึ่ง GPU ครึ่ง CPU ทางเลือกคือ:
+และ NeMo-Speech.cpp ยังไม่มีตัวเลือกแบ่งเลเยอร์ไป CPU แบบ llama.cpp (`-ngl`) ทางเลือกคือ:
 
 1. **รันบน CPU** (`start.bat` เลือกให้อัตโนมัติ) — ต้องมี RAM ประมาณ 32 GB ขึ้นไป ใช้ได้แต่ช้ากว่า GPU มาก
 2. **ใช้ model server เครื่องอื่น** ที่มีการ์ด 24 GB ขึ้นไป (หรือเช่า cloud GPU) แล้วตั้ง `MODEL_URL` และ `START_SERVER=0`
-3. **โมเดลเล็ก Nemotron 3.5 ASR Streaming 0.6B** รันบนการ์ด 16 GB สบาย แต่ภาษาไทยอยู่ในกลุ่มที่ NVIDIA ระบุว่า
+3. **ทดลอง: ให้การ์ดจอประมวลผล แล้วให้ไดรเวอร์ NVIDIA ล้นไปใช้ RAM** — บน Windows ไดรเวอร์ NVIDIA
+   (536.40 ขึ้นไป) มีฟีเจอร์ *CUDA - Sysmem Fallback Policy* ที่ให้ส่วนที่ไม่พอใน VRAM ไปอยู่ใน RAM ระบบผ่าน PCIe
+   - NVIDIA Control Panel → Manage 3D settings → *CUDA - Sysmem Fallback Policy* = **Driver Default** หรือ **Prefer Sysmem Fallback**
+   - ใส่ `set "DEVICE=cuda:0"` ใน `config.local.bat` แล้วรัน `start.bat` ใหม่
+   - ไม่มีอะไรรับประกัน: อาจเร็วกว่า CPU หรือช้ากว่าก็ได้ ขึ้นกับว่าไดรเวอร์ย้ายส่วนไหนไป RAM — ลองไฟล์สั้นเทียบตัวเลข ×realtime กับโหมด CPU
+4. **โมเดลเล็ก Nemotron 3.5 ASR Streaming 0.6B** รันบนการ์ด 16 GB สบาย แต่ภาษาไทยอยู่ในกลุ่มที่ NVIDIA ระบุว่า
    ต้อง fine-tune ก่อนใช้งานจริง — ไม่แนะนำสำหรับภาษาไทย
 
 ## เริ่มใช้งาน

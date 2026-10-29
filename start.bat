@@ -94,8 +94,10 @@ if errorlevel 1 goto fail
 set "USER_DEVICE=%DEVICE%"
 call "%MODEL_DIR%\selected.bat"
 if defined USER_DEVICE set "DEVICE=%USER_DEVICE%"
+rem DEVICE: cpu, or cuda:N / N for GPU N. Maps to asr.backend.gpu (-1 = CPU).
 set "DEVICE_ARG="
-if defined DEVICE set "DEVICE_ARG=--device %DEVICE%"
+if /i "%DEVICE%"=="cpu" set "DEVICE_ARG=--asr.backend.gpu -1"
+if defined DEVICE if /i not "%DEVICE%"=="cpu" set "DEVICE_ARG=--asr.backend.gpu %DEVICE:cuda:=%"
 if /i "%DEVICE%"=="cpu" echo [3/4] Running on the CPU: expect transcription to be much slower than on a GPU.
 
 echo [3/4] Starting the model server in a new window (loading takes a few minutes).
