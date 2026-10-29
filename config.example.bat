@@ -18,8 +18,9 @@ rem nemo = NVIDIA NeMo-Speech.cpp, native Windows (default)
 rem vllm = vLLM inside WSL2 (needs Ubuntu in WSL)
 set "BACKEND=nemo"
 
-rem NeMo-Speech.cpp release channel: stable or nightly
-set "NS_CHANNEL=stable"
+rem NeMo-Speech.cpp release channel. Keep nightly: the stable 0.2.0 release
+rem cannot run Nemotron 3.5 Transcribe yet.
+set "NS_CHANNEL=nightly"
 
 rem Where model files are stored (20-35 GB)
 rem set "MODEL_DIR=D:\models\nemotron"

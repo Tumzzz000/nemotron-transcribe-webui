@@ -93,7 +93,7 @@ git pull
 | `MODEL_DIR` | `models\` ในโปรเจกต์ | ที่เก็บไฟล์โมเดล |
 | `GGUF_REPO`, `MODEL_FILE` | เลือกให้อัตโนมัติ | เลือก repo / ไฟล์โมเดลเอง |
 | `HF_TOKEN` | — | token ของ Hugging Face ถ้าการดาวน์โหลดขอ |
-| `NS_CHANNEL` | `stable` | `nightly` = ใช้ NeMo-Speech.cpp รุ่นล่าสุด |
+| `NS_CHANNEL` | `nightly` | รุ่นของ NeMo-Speech.cpp — ต้องเป็น `nightly` เพราะรุ่น stable 0.2.0 ยังรันโมเดลนี้ไม่ได้ |
 | `HOST` | `127.0.0.1` | `0.0.0.0` = ให้มือถือ/เครื่องอื่นในวง LAN เปิดหน้าเว็บได้ |
 | `BACKEND` | `nemo` | `vllm` = ใช้ vLLM ใน WSL2 แทน (ดูด้านล่าง) |
 

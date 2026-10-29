@@ -10,7 +10,8 @@ set "MODEL_URL="
 set "MODEL_NAME="
 set "START_SERVER=1"
 set "BACKEND=nemo"
-set "NS_CHANNEL=stable"
+rem Nemotron 3.5 Transcribe (speech-LLM) needs the nightly build: stable 0.2.0 predates it.
+set "NS_CHANNEL=nightly"
 set "MODEL_DIR=%~dp0models"
 set "MODEL_VARIANT="
 set "EXTRA_VLLM_ARGS="
@@ -67,15 +68,22 @@ if not "%START_SERVER%"=="1" (
 if /i "%BACKEND%"=="vllm" goto server_vllm
 
 rem ---- 2. NeMo-Speech.cpp runtime: native Windows, no WSL needed ----
-set "NS_EXE=%LOCALAPPDATA%\Programs\NeMoSpeech\bin\nemo-speech.exe"
-if exist "%NS_EXE%" goto ns_ok
-echo [2/4] Installing NVIDIA NeMo-Speech.cpp runtime...
+set "NS_PREFIX=%LOCALAPPDATA%\Programs\NeMoSpeech"
+set "NS_EXE=%NS_PREFIX%\bin\nemo-speech.exe"
+set "NS_MARK=%NS_PREFIX%\.nemotron-webui-channel"
+rem Reinstall when the binary is missing or came from another channel than NS_CHANNEL
+rem (an install from an older start.bat used stable, which cannot run this model).
+set "NS_HAVE="
+if exist "%NS_MARK%" set /p NS_HAVE=<"%NS_MARK%"
+if exist "%NS_EXE%" if /i "%NS_HAVE%"=="%NS_CHANNEL%" goto ns_ok
+echo [2/4] Installing NVIDIA NeMo-Speech.cpp runtime (%NS_CHANNEL%)...
 set "NS_SCRIPT=%TEMP%\nemo-speech-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/NVIDIA/NeMo-Speech.cpp/raw/main/scripts/install.ps1' -OutFile $env:NS_SCRIPT"
 if errorlevel 1 goto fail
 powershell -NoProfile -ExecutionPolicy Bypass -File "%NS_SCRIPT%" -BinaryOnly -Channel %NS_CHANNEL%
 if errorlevel 1 goto fail
 if not exist "%NS_EXE%" goto fail
+>"%NS_MARK%" echo %NS_CHANNEL%
 :ns_ok
 echo [2/4] NeMo-Speech.cpp ready.
 
