@@ -168,6 +168,7 @@
         <button class="btn" id="copyBtn" disabled>คัดลอก</button>
         <button class="btn" id="saveBtn" disabled>บันทึก .txt</button>
         <button class="btn" id="srtBtn" hidden>บันทึก .srt</button>
+        <button class="btn" id="srt2Btn" hidden>.srt 2 ภาษา</button>
       </div>
       <details class="reason" id="reasonBox" hidden><summary>ความคิดของโมเดล (reasoning)</summary><pre id="reasonText"></pre></details>
       <div id="output" class="empty">เลือกไฟล์เสียง แล้วกด “เริ่มประมวลผล”</div>
@@ -292,6 +293,7 @@ const PRESETS = [
   { id: "timestamps", label: "ถอดเสียง + เวลา (ซับไตเติล)", prompt: "", timestamps: true },
   { id: "speakers", label: "แยกผู้พูด", prompt: SPEAKER_PROMPT, addLang: true },
   { id: "readable", label: "ถอดแบบอ่านง่าย", prompt: "Create a readable transcript of this recording with punctuation. Omit verbal fillers and accidental repetitions, but retain the remaining wording and meaning. Return only the transcript.", addLang: true },
+  { id: "subth", label: "ซับไตเติลแปลไทย", prompt: "", timestamps: true, translateTo: "th" },
   { id: "translate", label: "แปลเป็นไทย", prompt: "Translate the speech into Thai." },
   { id: "summary", label: "สรุปเนื้อหา", prompt: "Summarize the content of this audio in Thai." },
   { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "Based on the audio, answer in Thai: " },
@@ -358,7 +360,7 @@ $("recBtn").onclick = async () => {
 };
 
 // ---------- run ----------
-let controller = null, resultText = "", srtText = "", lastName = "transcript";
+let controller = null, resultText = "", srtText = "", srt2Text = "", lastName = "transcript";
 // "<spk:0> hello <spk:1> hi" -> one line per speaker turn.
 function prettify(t) {
   return t.replace(/\s*<spk:(\d+)>\s*/g, (m, n, off) => (off ? "\n\n" : "") + `[ผู้พูด ${+n + 1}] `);
@@ -378,6 +380,18 @@ function fromCues(tr) {
   });
   return { text: lines.join("\n"), srt: srt.join("\n") };
 }
+// Translated subtitles: one cue per line, the translation first and the original below it.
+function fromTranslated(cues) {
+  const lines = [], srt = [], srt2 = [];
+  cues.forEach((c, i) => {
+    const th = c.th == null ? "…" : (c.th || (c.error ? "⚠ แปลไม่สำเร็จ" : ""));
+    lines.push(`[${clock(c.start)}] ${th}` + (c.text ? `\n         ${c.text}` : ""));
+    const time = `${i + 1}\n${clock(c.start, true)} --> ${clock(c.end, true)}\n`;
+    srt.push(time + (c.th || c.text) + "\n");
+    srt2.push(time + ([c.th, c.text].filter(Boolean).join("\n") || "…") + "\n");
+  });
+  return { text: lines.join("\n\n"), srt: srt.join("\n"), srt2: srt2.join("\n") };
+}
 function setOutput(text, isErr) {
   const o = $("output"); o.classList.toggle("empty", !text && !isErr);
   if (isErr) { o.innerHTML = ""; const d = document.createElement("div"); d.className = "err"; d.textContent = text; o.appendChild(d); }
@@ -387,6 +401,7 @@ function renderStats(s) {
   const parts = [];
   if (s.duration) parts.push(`เสียง <b>${fmtTime(s.duration)}</b>`);
   if (s.elapsed != null) parts.push(`ใช้เวลา <b>${s.elapsed.toFixed(1)} วิ</b>`);
+  if (s.total) parts.push(`แปล <b>${s.translated}/${s.total}</b> ช่วง`);
   if (s.duration && s.elapsed > 0.5 && s.done) parts.push(`เร็ว <b>${(s.duration / s.elapsed).toFixed(1)}×</b> realtime`);
   $("stats").innerHTML = parts.map(x => `<span>${x}</span>`).join("");
 }
@@ -397,13 +412,15 @@ $("runBtn").onclick = async () => {
   fd.append("file", audioFile, audioFile.name);
   fd.append("prompt", $("prompt").value.trim()); fd.append("language", $("lang").value);
   fd.append("timestamps", currentPreset().timestamps ? "true" : "false");
+  fd.append("translate_to", currentPreset().translateTo || "");
   fd.append("system", settings.system); fd.append("server_url", settings.server_url); fd.append("model", settings.model);
   fd.append("temperature", settings.temperature); fd.append("max_tokens", settings.max_tokens);
 
-  controller = new AbortController(); resultText = ""; srtText = ""; let raw = "", reasoning = "", errored = false;
-  $("srtBtn").hidden = true;
+  controller = new AbortController(); resultText = ""; srtText = ""; srt2Text = ""; let raw = "", reasoning = "", errored = false;
+  let cues = null;
+  $("srtBtn").hidden = $("srt2Btn").hidden = true;
   lastName = audioFile.name.replace(/\.[^.]+$/, "");
-  const st = { duration: 0, elapsed: null, done: false }; const t0 = performance.now();
+  const st = { duration: 0, elapsed: null, done: false, total: 0, translated: 0 }; const t0 = performance.now();
   $("runBtn").innerHTML = '<span class="spinner"></span> กำลังประมวลผล… (คลิกเพื่อหยุด)';
   $("copyBtn").disabled = $("saveBtn").disabled = true; $("reasonBox").hidden = true; $("reasonText").textContent = "";
   setOutput(""); $("output").classList.add("empty"); $("output").textContent = "กำลังอัปโหลดและแปลงไฟล์เสียง…";
@@ -424,6 +441,13 @@ $("runBtn").onclick = async () => {
         const data = line.slice(5).trim(); if (data === "[DONE]") continue;
         let msg; try { msg = JSON.parse(data); } catch { continue; }
         if (msg.meta) { st.duration = msg.meta.duration; continue; }
+        if (msg.translate_start || msg.translated) {
+          if (msg.translate_start) { cues = msg.translate_start.cues.map(c => ({ ...c, th: null })); st.total = cues.length; }
+          else { const t = msg.translated; Object.assign(cues[t.index], { th: t.text, error: t.error }); st.translated++; }
+          const t = fromTranslated(cues); resultText = t.text; srtText = t.srt; srt2Text = t.srt2; setOutput(resultText);
+          continue;
+        }
+        if (msg.translate_done) continue;
         if (msg.error) { throw new Error(typeof msg.error === "string" ? msg.error : (msg.error.message || JSON.stringify(msg.error))); }
         const delta = msg.choices?.[0]?.delta || {};
         const r = delta.reasoning_content ?? delta.reasoning;
@@ -441,7 +465,8 @@ $("runBtn").onclick = async () => {
   } finally {
     clearInterval(tick); st.elapsed = (performance.now() - t0) / 1000; st.done = !errored; renderStats(st);
     controller = null; $("runBtn").textContent = "เริ่มประมวลผล";
-    $("copyBtn").disabled = $("saveBtn").disabled = !resultText; $("srtBtn").hidden = !srtText;
+    $("copyBtn").disabled = $("saveBtn").disabled = !resultText; $("srtBtn").hidden = !srtText; $("srt2Btn").hidden = !srt2Text;
+    $("srtBtn").textContent = srt2Text ? "บันทึก .srt ไทย" : "บันทึก .srt";
     if (resultText) addHistory({ name: audioFile?.name || lastName, text: resultText, at: Date.now() });
   }
 };
@@ -453,11 +478,13 @@ $("saveBtn").onclick = () => {
   a.download = lastName + ".txt"; a.click(); URL.revokeObjectURL(a.href);
 };
 
-$("srtBtn").onclick = () => {
+function saveSrt(text, name) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([srtText], { type: "application/x-subrip;charset=utf-8" }));
-  a.download = lastName + ".srt"; a.click(); URL.revokeObjectURL(a.href);
-};
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/x-subrip;charset=utf-8" }));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+$("srtBtn").onclick = () => saveSrt(srtText, lastName + (srt2Text ? ".th.srt" : ".srt"));
+$("srt2Btn").onclick = () => saveSrt(srt2Text, lastName + ".th-orig.srt");
 
 // ---------- history (this browser only) ----------
 let hist = store.get("history", []);
@@ -469,7 +496,7 @@ function renderHistory() {
     const s = document.createElement("span"); s.textContent = h.name + " — " + h.text.slice(0, 120);
     const t = document.createElement("time"); t.textContent = new Date(h.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
     li.append(s, t);
-    li.onclick = () => { resultText = h.text; srtText = ""; $("srtBtn").hidden = true; lastName = h.name.replace(/\.[^.]+$/, ""); setOutput(h.text); $("stats").innerHTML = "";
+    li.onclick = () => { resultText = h.text; srtText = srt2Text = ""; $("srtBtn").hidden = $("srt2Btn").hidden = true; lastName = h.name.replace(/\.[^.]+$/, ""); setOutput(h.text); $("stats").innerHTML = "";
       $("copyBtn").disabled = $("saveBtn").disabled = false; };
     $("historyList").appendChild(li);
   });
