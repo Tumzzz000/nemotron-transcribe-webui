@@ -119,13 +119,12 @@ def fallback_cues(duration: float, step: float = 8.0) -> list[dict]:
 
 
 async def translate_audio(client: httpx.AsyncClient, server_url: str, model: str,
-                          wav: bytes, target: str, language: str) -> str:
+                          wav: bytes, instruction: str, language: str) -> str:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": [
             {"type": "input_audio", "input_audio": {"data": base64.b64encode(wav).decode(), "format": "wav"}},
-            # NVIDIA's speech translation prompt (NeMo-Speech.cpp docs/salm/prompts.md).
-            {"type": "text", "text": f"Translate the speech into {target}."},
+            {"type": "text", "text": instruction},
         ]}],
         "temperature": 0,
     }
@@ -207,6 +206,7 @@ async def transcribe(
     temperature: float = Form(0.0),
     max_tokens: int = Form(16384),
     translate_to: str = Form(""),
+    translate_prompt: str = Form(""),
 ):
     server_url = server_url.rstrip("/")
     suffix = Path(file.filename or "audio").suffix or ".bin"
@@ -233,6 +233,8 @@ async def transcribe(
     if translate_to and info["kind"] != "nemo-speech":
         raise HTTPException(400, "ซับไตเติลแปลภาษาต้องใช้ NeMo-Speech.cpp (ต้องการเวลาของแต่ละช่วงจาก server)")
     target_name = LANGUAGE_NAMES.get(translate_to, translate_to)
+    # NVIDIA's speech translation prompt (NeMo-Speech.cpp docs/salm/prompts.md) unless the user wrote one.
+    translate_prompt = translate_prompt.strip() or f"Translate the speech into {target_name}."
     payload = build_payload(info["kind"], model, wav, prompt.strip(), language.strip(),
                             timestamps or bool(translate_to), system, temperature, max_tokens)
 
@@ -278,7 +280,7 @@ async def transcribe(
                         try:
                             text = await translate_audio(client, server_url, model,
                                                          wav_segment(pcm, cue["start"], cue["end"]),
-                                                         target_name, language.strip())
+                                                         translate_prompt, language.strip())
                             return i, text, None
                         except Exception as exc:
                             return i, "", str(exc)[:300]

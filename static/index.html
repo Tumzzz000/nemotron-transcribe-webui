@@ -150,8 +150,9 @@
         </select>
       </div>
       <div style="margin-top:14px">
-        <label class="field" for="prompt">Prompt ที่จะส่งให้โมเดล (แก้ได้)</label>
+        <label class="field" for="prompt" id="promptLabel">Prompt ที่จะส่งให้โมเดล (แก้ได้)</label>
         <textarea id="prompt" placeholder="ว่างไว้ = ใช้ prompt มาตรฐานของ NVIDIA สำหรับถอดเสียงตามภาษาที่เลือก"></textarea>
+        <div class="muted" id="promptHint" style="margin-top:6px"></div>
       </div>
       <div style="margin-top:16px" class="row">
         <button class="btn primary wide" id="runBtn" disabled>เริ่มประมวลผล</button>
@@ -293,7 +294,8 @@ const PRESETS = [
   { id: "timestamps", label: "ถอดเสียง + เวลา (ซับไตเติล)", prompt: "", timestamps: true },
   { id: "speakers", label: "แยกผู้พูด", prompt: SPEAKER_PROMPT, addLang: true },
   { id: "readable", label: "ถอดแบบอ่านง่าย", prompt: "Create a readable transcript of this recording with punctuation. Omit verbal fillers and accidental repetitions, but retain the remaining wording and meaning. Return only the transcript.", addLang: true },
-  { id: "subth", label: "ซับไตเติลแปลไทย", prompt: "", timestamps: true, translateTo: "th" },
+  // The prompt box holds the translation instruction here; step 1 transcribes with NVIDIA's default prompt.
+  { id: "subth", label: "ซับไตเติลแปลไทย", prompt: "Translate the speech into Thai.", timestamps: true, translateTo: "th" },
   { id: "translate", label: "แปลเป็นไทย", prompt: "Translate the speech into Thai." },
   { id: "summary", label: "สรุปเนื้อหา", prompt: "Summarize the content of this audio in Thai." },
   { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "Based on the audio, answer in Thai: " },
@@ -306,19 +308,31 @@ function buildPrompt() {
   const p = currentPreset(); const lang = $("lang").value;
   return p.prompt + (p.prompt && p.addLang && lang ? ` The speech is in ${LANG_NAMES[lang]}.` : "");
 }
+function updatePromptHint() {
+  const p = currentPreset(), lang = $("lang").selectedOptions[0]?.textContent || "";
+  const std = $("lang").value ? `prompt มาตรฐานของ NVIDIA + บอกโมเดลว่าเสียงเป็นภาษา${lang}` : "prompt มาตรฐานของ NVIDIA";
+  $("promptLabel").textContent = p.translateTo ? "Prompt สำหรับแปลแต่ละช่วง (แก้ได้)" : "Prompt ที่จะส่งให้โมเดล (แก้ได้)";
+  $("promptHint").textContent = p.translateTo
+    ? `ขั้น 1 ถอดเสียงพร้อมเวลา: ใช้ ${std} · ขั้น 2 แปลเสียงทีละช่วง: ใช้ข้อความในช่องนี้ — ` +
+      "เพิ่มคำศัพท์เฉพาะหรือสไตล์การแปลได้ (เขียนเป็นภาษาอังกฤษ) เช่น Use casual Thai. Keep names in English."
+    : !$("prompt").value.trim()
+      ? `ช่องว่าง = ใช้ ${std}` + (p.timestamps ? " · เวลากำกับขอจาก server แยกต่างหาก ไม่ต้องเขียนใน prompt" : "")
+      : "ข้อความนี้ส่งให้โมเดลตามที่เขียน (custom instruction) — ถ้าภาษาสำคัญให้ระบุในข้อความด้วย";
+}
 function renderPresets() {
   $("presets").innerHTML = "";
   for (const p of PRESETS) {
     const b = document.createElement("button");
     b.className = "chip" + (p.id === preset ? " active" : ""); b.textContent = p.label;
-    b.onclick = () => { preset = p.id; store.set("preset", preset); renderPresets(); $("prompt").value = buildPrompt();
+    b.onclick = () => { preset = p.id; store.set("preset", preset); renderPresets(); $("prompt").value = buildPrompt(); updatePromptHint();
       if (p.id === "qa") { $("prompt").focus(); $("prompt").setSelectionRange(1e4, 1e4); } };
     $("presets").appendChild(b);
   }
 }
 $("lang").value = store.get("lang", "th");
 if ($("lang").selectedIndex < 0) $("lang").value = "th";
-$("lang").onchange = () => { store.set("lang", $("lang").value); $("prompt").value = buildPrompt(); };
+$("lang").onchange = () => { store.set("lang", $("lang").value); $("prompt").value = buildPrompt(); updatePromptHint(); };
+$("prompt").addEventListener("input", updatePromptHint);
 
 // ---------- audio input ----------
 let audioFile = null;
@@ -410,7 +424,9 @@ $("runBtn").onclick = async () => {
   if (!audioFile) return;
   const fd = new FormData();
   fd.append("file", audioFile, audioFile.name);
-  fd.append("prompt", $("prompt").value.trim()); fd.append("language", $("lang").value);
+  if (currentPreset().translateTo) { fd.append("prompt", ""); fd.append("translate_prompt", $("prompt").value.trim()); }
+  else fd.append("prompt", $("prompt").value.trim());
+  fd.append("language", $("lang").value);
   fd.append("timestamps", currentPreset().timestamps ? "true" : "false");
   fd.append("translate_to", currentPreset().translateTo || "");
   fd.append("system", settings.system); fd.append("server_url", settings.server_url); fd.append("model", settings.model);
@@ -505,7 +521,7 @@ $("clearHist").onclick = () => { hist = []; store.set("history", hist); renderHi
 
 let toastT; function toast(m) { $("toast").textContent = m; $("toast").classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => $("toast").classList.remove("show"), 2200); }
 
-renderPresets(); $("prompt").value = buildPrompt(); renderHistory();
+renderPresets(); $("prompt").value = buildPrompt(); updatePromptHint(); renderHistory();
 // Keep polling while the model server is still starting up.
 let connected = false;
 loadDefaults().then(async () => { connected = !!(await checkStatus())?.ok; });
