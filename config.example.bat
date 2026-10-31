@@ -46,3 +46,10 @@ rem Force where the model runs: cpu, or cuda:0 for the first GPU (default: picke
 rem cuda:0 on a GPU smaller than the model relies on the NVIDIA driver spilling into
 rem system RAM ("CUDA - Sysmem Fallback Policy"); see README.md.
 rem set "DEVICE=cuda:0"
+
+rem Text LLM that writes the Thai translations, summaries and answers
+rem (any OpenAI-compatible API; also settable in the web page's settings)
+rem Ollama:    http://localhost:11434/v1     LM Studio: http://localhost:1234/v1
+rem set "LLM_URL=http://localhost:11434/v1"
+rem set "LLM_MODEL=gemma3:12b"
+rem set "LLM_API_KEY="

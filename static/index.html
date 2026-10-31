@@ -71,7 +71,7 @@
   .chip { border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
   .chip.active { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
   label.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  textarea, input[type=text], input[type=number], select { width: 100%; border: 1px solid var(--border); background: var(--panel-2);
+  textarea, input[type=text], input[type=number], input[type=password], select { width: 100%; border: 1px solid var(--border); background: var(--panel-2);
     border-radius: 9px; padding: 9px 11px; outline: none; }
   textarea:focus, input:focus, select:focus { border-color: var(--accent); }
   textarea { resize: vertical; min-height: 76px; }
@@ -97,7 +97,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(520px, calc(100vw - 32px)); }
   dialog::backdrop { background: rgba(0,0,0,.4); }
-  .dlg-body { padding: 20px; } .dlg-body > * + * { margin-top: 14px; }
+  .dlg-body { padding: 20px; max-height: calc(100vh - 150px); overflow-y: auto; } .dlg-body > * + * { margin-top: 14px; }
   .dlg-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
@@ -171,6 +171,7 @@
         <button class="btn" id="srtBtn" hidden>บันทึก .srt</button>
         <button class="btn" id="srt2Btn" hidden>.srt 2 ภาษา</button>
       </div>
+      <details class="reason" id="sourceBox" hidden><summary>ข้อความต้นฉบับ (Nemotron ถอดเสียง)</summary><pre id="sourceText"></pre></details>
       <details class="reason" id="reasonBox" hidden><summary>ความคิดของโมเดล (reasoning)</summary><pre id="reasonText"></pre></details>
       <div id="output" class="empty">เลือกไฟล์เสียง แล้วกด “เริ่มประมวลผล”</div>
       <div class="history" id="historyBox" hidden>
@@ -203,6 +204,22 @@
         <textarea id="sSystem" style="min-height:60px"></textarea>
       </div>
       <label class="check"><input type="checkbox" id="sReason"> แสดง reasoning ของโมเดล (ถ้ามี)</label>
+      <h3 style="margin:22px 0 0;font-size:15px">LLM สำหรับภาษาไทย (แปล / สรุป / ถาม-ตอบ / ซับแปลไทย)</h3>
+      <div class="muted">Nemotron ถอดเสียงอย่างเดียว ส่วนงานภาษาไทยส่งต่อให้ LLM ที่มี API แบบ OpenAI:
+        Ollama <code>http://localhost:11434/v1</code> · LM Studio <code>http://localhost:1234/v1</code> · หรือบริการออนไลน์ (ใส่ API key)</div>
+      <div>
+        <label class="field" for="sLlmUrl">ที่อยู่ LLM API</label>
+        <input type="text" id="sLlmUrl" placeholder="http://localhost:11434/v1">
+      </div>
+      <div>
+        <label class="field" for="sLlmModel">โมเดล LLM</label>
+        <div class="row" style="flex-wrap:nowrap"><select id="sLlmModel"><option value="">ใช้ตัวแรกที่มี</option></select>
+        <button type="button" class="btn" id="sLlmRefresh">รีเฟรช</button></div>
+      </div>
+      <div>
+        <label class="field" for="sLlmKey">API key (เฉพาะบริการออนไลน์)</label>
+        <input type="password" id="sLlmKey" autocomplete="off">
+      </div>
     </div>
     <div class="dlg-foot">
       <button class="btn" value="cancel">ยกเลิก</button>
@@ -229,7 +246,8 @@ $("themeBtn").onclick = () => {
 };
 
 // ---------- settings ----------
-let settings = { server_url: "", model: "", temperature: 0, max_tokens: 16384, system: "", show_reasoning: false, ...store.get("settings", {}) };
+let settings = { server_url: "", model: "", temperature: 0, max_tokens: 16384, system: "", show_reasoning: false,
+  llm_url: "", llm_model: "", llm_key: "", ...store.get("settings", {}) };
 if (!settings.server_url && settings.vllm_url) settings.server_url = settings.vllm_url;
 const KIND_LABEL = { "nemo-speech": "NeMo-Speech", vllm: "vLLM" };
 async function loadDefaults() {
@@ -237,6 +255,8 @@ async function loadDefaults() {
     const cfg = await (await fetch("/api/config")).json();
     if (!settings.server_url) settings.server_url = cfg.server_url;
     if (!settings.model && cfg.model) settings.model = cfg.model;
+    if (!settings.llm_url) settings.llm_url = cfg.llm_url;
+    if (!settings.llm_model && cfg.llm_model) settings.llm_model = cfg.llm_model;
   } catch {}
 }
 
@@ -268,8 +288,25 @@ $("statusBtn").onclick = checkStatus;
 $("settingsBtn").onclick = () => {
   $("sUrl").value = settings.server_url; $("sTemp").value = settings.temperature; $("sMax").value = settings.max_tokens;
   $("sSystem").value = settings.system; $("sReason").checked = settings.show_reasoning; $("sModel").value = settings.model;
+  $("sLlmUrl").value = settings.llm_url; $("sLlmKey").value = settings.llm_key;
+  fillLlmModels(settings.llm_model ? [settings.llm_model] : []); refreshLlm(true);
   $("settings").showModal();
 };
+function fillLlmModels(models) {
+  const sel = $("sLlmModel"), cur = sel.value || settings.llm_model;
+  sel.innerHTML = '<option value="">ใช้ตัวแรกที่มี</option>' +
+    models.map(m => `<option value="${m.replace(/"/g, "&quot;")}">${m}</option>`).join("");
+  sel.value = models.includes(cur) ? cur : "";
+}
+async function refreshLlm(quiet) {
+  const q = `url=${encodeURIComponent($("sLlmUrl").value.trim() || "http://localhost:11434/v1")}&key=${encodeURIComponent($("sLlmKey").value)}`;
+  try {
+    const r = await (await fetch("/api/llm-status?" + q)).json();
+    if (r.ok) { fillLlmModels(r.models); if (!quiet) toast("LLM: พบ " + r.models.length + " โมเดล"); }
+    else if (!quiet) toast("เชื่อมต่อ LLM ไม่ได้: " + r.error);
+  } catch {}
+}
+$("sLlmRefresh").onclick = () => refreshLlm(false);
 $("sRefresh").onclick = async () => {
   const r = await (await fetch("/api/status?server_url=" + encodeURIComponent($("sUrl").value))).json();
   if (r.ok) { fillModels(r.models); toast("พบ " + r.models.length + " โมเดล"); } else toast("เชื่อมต่อไม่ได้: " + r.error);
@@ -278,7 +315,8 @@ $("settings").addEventListener("close", () => {
   if ($("settings").returnValue !== "ok") return;
   settings = { server_url: $("sUrl").value.trim() || "http://localhost:8000", model: $("sModel").value,
     temperature: parseFloat($("sTemp").value) || 0, max_tokens: parseInt($("sMax").value) || 16384,
-    system: $("sSystem").value, show_reasoning: $("sReason").checked };
+    system: $("sSystem").value, show_reasoning: $("sReason").checked,
+    llm_url: $("sLlmUrl").value.trim() || "http://localhost:11434/v1", llm_model: $("sLlmModel").value, llm_key: $("sLlmKey").value };
   store.set("settings", settings); checkStatus().then(r => { connected = !!r?.ok; });
 });
 
@@ -294,11 +332,12 @@ const PRESETS = [
   { id: "timestamps", label: "ถอดเสียง + เวลา (ซับไตเติล)", prompt: "", timestamps: true },
   { id: "speakers", label: "แยกผู้พูด", prompt: SPEAKER_PROMPT, addLang: true },
   { id: "readable", label: "ถอดแบบอ่านง่าย", prompt: "Create a readable transcript of this recording with punctuation. Omit verbal fillers and accidental repetitions, but retain the remaining wording and meaning. Return only the transcript.", addLang: true },
-  // The prompt box holds the translation instruction here; step 1 transcribes with NVIDIA's default prompt.
-  { id: "subth", label: "ซับไตเติลแปลไทย", prompt: "Translate the speech into Thai.", timestamps: true, translateTo: "th" },
-  { id: "translate", label: "แปลเป็นไทย", prompt: "Translate the speech into Thai." },
-  { id: "summary", label: "สรุปเนื้อหา", prompt: "Summarize the content of this audio in Thai." },
-  { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "Based on the audio, answer in Thai: " },
+  // Nemotron cannot write Thai translations, summaries or answers, so these presets transcribe with
+  // NVIDIA's default prompt and send the transcript to the text LLM; the prompt box is for the LLM.
+  { id: "subth", label: "ซับไตเติลแปลไทย", prompt: "", timestamps: true, llm: "subtitles" },
+  { id: "translate", label: "แปลเป็นไทย", prompt: "", llm: "translate" },
+  { id: "summary", label: "สรุปเนื้อหา", prompt: "", llm: "summary" },
+  { id: "qa", label: "ถามเกี่ยวกับเสียง", prompt: "", llm: "qa" },
 ];
 const LANG_NAMES = { th: "Thai", en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese", vi: "Vietnamese",
   id: "Indonesian", hi: "Hindi", es: "Spanish", fr: "French", de: "German", ru: "Russian", ar: "Arabic" };
@@ -311,10 +350,20 @@ function buildPrompt() {
 function updatePromptHint() {
   const p = currentPreset(), lang = $("lang").selectedOptions[0]?.textContent || "";
   const std = $("lang").value ? `prompt มาตรฐานของ NVIDIA + บอกโมเดลว่าเสียงเป็นภาษา${lang}` : "prompt มาตรฐานของ NVIDIA";
-  $("promptLabel").textContent = p.translateTo ? "Prompt สำหรับแปลแต่ละช่วง (แก้ได้)" : "Prompt ที่จะส่งให้โมเดล (แก้ได้)";
-  $("promptHint").textContent = p.translateTo
-    ? `ขั้น 1 ถอดเสียงพร้อมเวลา: ใช้ ${std} · ขั้น 2 แปลเสียงทีละช่วง: ใช้ข้อความในช่องนี้ — ` +
-      "เพิ่มคำศัพท์เฉพาะหรือสไตล์การแปลได้ (เขียนเป็นภาษาอังกฤษ) เช่น Use casual Thai. Keep names in English."
+  const LLM_TEXT = {
+    subtitles: ["คำสั่งเพิ่มเติมสำหรับการแปลซับ (ไม่บังคับ)", "เช่น ใช้ภาษาพูด, คงชื่อตัวละครเป็นภาษาญี่ปุ่น, 先輩 = รุ่นพี่",
+      "ขั้น 1 Nemotron ถอดเสียงพร้อมเวลา · ขั้น 2 LLM แปลแต่ละช่วงเป็นไทย (ตั้ง LLM ที่ปุ่มฟันเฟือง)"],
+    translate: ["คำสั่งเพิ่มเติมสำหรับการแปล (ไม่บังคับ)", "เช่น แปลแบบทางการ, คงศัพท์เทคนิคเป็นภาษาอังกฤษ",
+      "ขั้น 1 Nemotron ถอดเสียง · ขั้น 2 LLM แปลทั้งหมดเป็นไทย (ตั้ง LLM ที่ปุ่มฟันเฟือง)"],
+    summary: ["คำสั่งเพิ่มเติมสำหรับการสรุป (ไม่บังคับ)", "เช่น สรุปไม่เกิน 5 ข้อ, เน้นสิ่งที่ต้องทำต่อ",
+      "ขั้น 1 Nemotron ถอดเสียง · ขั้น 2 LLM สรุปเป็นไทย (ตั้ง LLM ที่ปุ่มฟันเฟือง)"],
+    qa: ["คำถาม", "เช่น ในคลิปนี้ตกลงอะไรกันบ้าง",
+      "ขั้น 1 Nemotron ถอดเสียง · ขั้น 2 LLM ตอบคำถามเป็นไทยจากเนื้อหา (ตั้ง LLM ที่ปุ่มฟันเฟือง)"],
+  }[p.llm];
+  $("prompt").placeholder = LLM_TEXT ? LLM_TEXT[1] : "ว่างไว้ = ใช้ prompt มาตรฐานของ NVIDIA สำหรับถอดเสียงตามภาษาที่เลือก";
+  $("promptLabel").textContent = LLM_TEXT ? LLM_TEXT[0] : "Prompt ที่จะส่งให้โมเดล (แก้ได้)";
+  $("promptHint").textContent = LLM_TEXT
+    ? `${LLM_TEXT[2]} · การถอดเสียงใช้ ${std}`
     : !$("prompt").value.trim()
       ? `ช่องว่าง = ใช้ ${std}` + (p.timestamps ? " · เวลากำกับขอจาก server แยกต่างหาก ไม่ต้องเขียนใน prompt" : "")
       : "ข้อความนี้ส่งให้โมเดลตามที่เขียน (custom instruction) — ถ้าภาษาสำคัญให้ระบุในข้อความด้วย";
@@ -415,6 +464,7 @@ function renderStats(s) {
   const parts = [];
   if (s.duration) parts.push(`เสียง <b>${fmtTime(s.duration)}</b>`);
   if (s.elapsed != null) parts.push(`ใช้เวลา <b>${s.elapsed.toFixed(1)} วิ</b>`);
+  if (s.llm) parts.push(`LLM <b>${s.llm}</b>`);
   if (s.total) parts.push(`แปล <b>${s.translated}/${s.total}</b> ช่วง`);
   if (s.duration && s.elapsed > 0.5 && s.done) parts.push(`เร็ว <b>${(s.duration / s.elapsed).toFixed(1)}×</b> realtime`);
   $("stats").innerHTML = parts.map(x => `<span>${x}</span>`).join("");
@@ -424,16 +474,18 @@ $("runBtn").onclick = async () => {
   if (!audioFile) return;
   const fd = new FormData();
   fd.append("file", audioFile, audioFile.name);
-  if (currentPreset().translateTo) { fd.append("prompt", ""); fd.append("translate_prompt", $("prompt").value.trim()); }
+  const task = currentPreset().llm || "";
+  if (task) { fd.append("prompt", ""); fd.append("task", task); fd.append("task_prompt", $("prompt").value.trim()); }
   else fd.append("prompt", $("prompt").value.trim());
+  fd.append("llm_url", settings.llm_url); fd.append("llm_model", settings.llm_model); fd.append("llm_key", settings.llm_key);
   fd.append("language", $("lang").value);
   fd.append("timestamps", currentPreset().timestamps ? "true" : "false");
-  fd.append("translate_to", currentPreset().translateTo || "");
   fd.append("system", settings.system); fd.append("server_url", settings.server_url); fd.append("model", settings.model);
   fd.append("temperature", settings.temperature); fd.append("max_tokens", settings.max_tokens);
 
   controller = new AbortController(); resultText = ""; srtText = ""; srt2Text = ""; let raw = "", reasoning = "", errored = false;
-  let cues = null;
+  let cues = null, source = "";
+  $("sourceBox").hidden = true; $("sourceText").textContent = "";
   $("srtBtn").hidden = $("srt2Btn").hidden = true;
   lastName = audioFile.name.replace(/\.[^.]+$/, "");
   const st = { duration: 0, elapsed: null, done: false, total: 0, translated: 0 }; const t0 = performance.now();
@@ -457,6 +509,15 @@ $("runBtn").onclick = async () => {
         const data = line.slice(5).trim(); if (data === "[DONE]") continue;
         let msg; try { msg = JSON.parse(data); } catch { continue; }
         if (msg.meta) { st.duration = msg.meta.duration; continue; }
+        if (msg.source_delta) {
+          source += msg.source_delta; $("sourceBox").hidden = false; $("sourceBox").open = true;
+          $("sourceText").textContent = prettify(source); $("sourceText").scrollTop = $("sourceText").scrollHeight;
+          $("output").textContent = "ขั้น 1/2: Nemotron กำลังถอดเสียง (ดูข้อความต้นฉบับด้านบน)…"; continue;
+        }
+        if (msg.llm) {
+          st.llm = msg.llm.model; $("sourceBox").open = false;
+          $("output").textContent = `ขั้น 2/2: ${msg.llm.model} กำลังเขียนภาษาไทย…`; continue;
+        }
         if (msg.translate_start || msg.translated) {
           if (msg.translate_start) { cues = msg.translate_start.cues.map(c => ({ ...c, th: null })); st.total = cues.length; }
           else { const t = msg.translated; Object.assign(cues[t.index], { th: t.text, error: t.error }); st.translated++; }

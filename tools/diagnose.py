@@ -1,10 +1,11 @@
-"""Check every web UI function against the running model server.
+"""Check every web UI function against the running servers.
 
-Sends the first part of an audio file through each preset exactly the way the
-web UI does, then reports per function: HTTP status, time, the start of the
-answer, how much of it is Thai script, and whether the Thai looks garbled
-(UTF-8 decoded with the wrong code page). Also asks the server which
-translation targets it accepts. The report is written to diagnose-report.txt.
+Sends the first part of an audio file through each Nemotron preset exactly the
+way the web UI does, then reports per function: HTTP status, time, the start of
+the answer, how much of it is Thai script, and whether the Thai looks garbled
+(UTF-8 decoded with the wrong code page). Then checks the text LLM that writes
+the Thai translations, summaries and answers (LLM_URL / LLM_MODEL / LLM_API_KEY).
+The report is written to diagnose-report.txt.
 
 Usage: python tools/diagnose.py <audio file> [language code, e.g. ja] [seconds]
 """
@@ -19,11 +20,15 @@ import time
 import wave
 from pathlib import Path
 
+import asyncio
+
 import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from app import DEFAULT_PROMPT, LANGUAGE_NAMES, convert_to_wav16k  # noqa: E402
+from app import (DEFAULT_LLM_KEY, DEFAULT_LLM_MODEL, DEFAULT_LLM_URL,  # noqa: E402
+                 LANGUAGE_NAMES, convert_to_wav16k)
+import llm as text_llm  # noqa: E402
 
 SERVER = (os.environ.get("MODEL_URL") or "http://localhost:8000").rstrip("/")
 REPORT = ROOT / "diagnose-report.txt"
@@ -41,17 +46,40 @@ READABLE_PROMPT = (
 
 
 def presets(lang_name: str) -> list[tuple[str, str, bool, bool]]:
-    """(name, instruction, timestamps, expects Thai output) - mirrors PRESETS in static/index.html."""
+    """(name, instruction, timestamps, expects Thai output) for the presets Nemotron answers itself
+    (static/index.html). Translation, summary and Q&A go through the text LLM, checked separately."""
     in_lang = f" The speech is in {lang_name}." if lang_name else ""
     return [
         ("ถอดเสียง", "", False, False),
         ("ถอดเสียง + เวลา", "", True, False),
         ("แยกผู้พูด", SPEAKER_PROMPT + in_lang, False, False),
         ("ถอดแบบอ่านง่าย", READABLE_PROMPT + in_lang, False, False),
-        ("แปลเป็นไทย", "Translate the speech into Thai.", False, True),
-        ("สรุปเนื้อหา", "Summarize the content of this audio in Thai.", False, True),
-        ("ถามเกี่ยวกับเสียง", "Based on the audio, answer in Thai: What is this audio about?", False, True),
     ]
+
+
+async def check_llm(transcript: str, lang_name: str, out) -> None:
+    url = DEFAULT_LLM_URL
+    out(f"\n=== Text LLM for Thai output ({url}) ===")
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=10)) as client:
+        llm = text_llm.LLM(client, url, DEFAULT_LLM_MODEL, DEFAULT_LLM_KEY)
+        try:
+            models = await text_llm.list_models(client, url, llm.headers)
+            out(f"models: {', '.join(models) or '(none)'}")
+            await llm.resolve_model()
+            t0 = time.time()
+            thai = await llm.complete([
+                {"role": "system", "content": text_llm.TRANSLATE_SYSTEM.format(src=lang_name or "the original language")},
+                {"role": "user", "content": transcript[:800]},
+            ])
+        except (text_llm.LLMError, httpx.HTTPError) as exc:
+            out(f"LLM not usable: {exc}")
+            out("Start Ollama / LM Studio, or set LLM_URL (and LLM_MODEL, LLM_API_KEY) in config.local.bat.")
+            return
+        ratio = thai_ratio(thai)
+        status = "OK" if ratio >= 0.5 and not GARBLED.search(thai) else (
+            "GARBLED THAI" if GARBLED.search(thai) else "NOT THAI")
+        out(f"[แปลเป็นไทย via {llm.model}] {time.time() - t0:.1f}s, Thai letters {ratio:.0%} -> {status}")
+        out("  answer: " + thai[:400].replace("\n", " / "))
 
 
 THAI = re.compile(r"[฀-๿]")
@@ -114,7 +142,8 @@ def main() -> int:
     wav = cut(convert_to_wav16k(src), seconds)
     b64 = base64.b64encode(wav).decode()
 
-    out("\n=== Functions (chat completions, the same requests the web UI sends) ===")
+    out("\n=== Nemotron functions (the same requests the web UI sends) ===")
+    transcript = ""
     for name, instruction, timestamps, wants_thai in presets(lang_name):
         content = [{"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}}]
         if instruction:
@@ -148,9 +177,11 @@ def main() -> int:
         out(f"\n[{name}] {took:.1f}s, Thai letters {ratio:.0%}"
             + (f" -> {'; '.join(verdict)}" if verdict else " -> OK"))
         out(f"  instruction: {instruction or '(server default prompt)'}")
+        if not instruction and not timestamps:
+            transcript = text
         out("  answer: " + text[:400].replace("\n", " / "))
 
-    out("\n=== Speech translation targets (/v1/audio/translations) ===")
+    out("\n=== Nemotron's own speech translation targets (for reference) ===")
     short = cut(wav, min(seconds, 15))
     for target in ("th", "en"):
         try:
@@ -163,6 +194,11 @@ def main() -> int:
             out(f"target {target}: HTTP {r.status_code}, Thai letters {thai_ratio(text):.0%}: {text[:300]}")
         except Exception as exc:
             out(f"target {target}: failed: {exc}")
+
+    if transcript:
+        asyncio.run(check_llm(transcript, lang_name, out))
+    else:
+        out("\nNo transcript from Nemotron, so the text LLM was not checked.")
 
     REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out(f"\nReport saved to {REPORT}")

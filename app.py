@@ -7,15 +7,12 @@ Nemotron 3.5 Transcribe and streams the answer back. Two servers are supported:
 - vLLM with the NeMo Speech plugin: Linux/WSL2, Hugging Face checkpoint.
 """
 
-import asyncio
 import base64
-import io
 import json
 import os
 import subprocess
 import tempfile
 import threading
-import wave
 import webbrowser
 from pathlib import Path
 
@@ -24,6 +21,8 @@ import imageio_ffmpeg
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+
+import llm as text_llm
 
 BASE_DIR = Path(__file__).parent
 HOST = os.environ.get("HOST", "127.0.0.1")
@@ -50,10 +49,11 @@ LANGUAGE_NAMES = {
     "ar": "Arabic", "tr": "Turkish", "nl": "Dutch",
 }
 
-# Requests sent to the model server at once while translating subtitle cues.
-TRANSLATE_CONCURRENCY = int(os.environ.get("TRANSLATE_CONCURRENCY", "4"))
-# Audio kept around each cue when it is cut out for translation, in seconds.
-CUE_PAD = 0.15
+# Text LLM for Thai output (any OpenAI-compatible API); Ollama by default.
+DEFAULT_LLM_URL = os.environ.get("LLM_URL", "http://localhost:11434/v1").rstrip("/")
+DEFAULT_LLM_MODEL = os.environ.get("LLM_MODEL", "")
+DEFAULT_LLM_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_TASKS = ("translate", "summary", "qa", "subtitles")
 
 app = FastAPI(title="Nemotron Transcribe Web UI")
 
@@ -90,51 +90,6 @@ async def server_info(server_url: str) -> dict:
     return {"kind": kind, "models": [m["id"] for m in data if "id" in m]}
 
 
-def wav_pcm(wav: bytes) -> bytes:
-    """PCM samples of a 16 kHz mono 16-bit WAV."""
-    i = wav.find(b"data")
-    return wav[i + 8:] if i >= 0 else wav[44:]
-
-
-def wav_segment(pcm: bytes, start: float, end: float) -> bytes:
-    """Cut [start, end] seconds (plus a little padding) out of 16 kHz mono PCM as a WAV."""
-    a = max(0, int((start - CUE_PAD) * 16000)) * 2
-    b = min(len(pcm), int((end + CUE_PAD) * 16000) * 2)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(16000)
-        w.writeframes(pcm[a:b])
-    return buf.getvalue()
-
-
-def fallback_cues(duration: float, step: float = 8.0) -> list[dict]:
-    """Fixed windows, used when the server returns no subtitle cues."""
-    cues, t = [], 0.0
-    while t < duration:
-        cues.append({"start": t, "end": min(duration, t + step), "text": ""})
-        t += step
-    return cues
-
-
-async def translate_audio(client: httpx.AsyncClient, server_url: str, model: str,
-                          wav: bytes, instruction: str, language: str) -> str:
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": [
-            {"type": "input_audio", "input_audio": {"data": base64.b64encode(wav).decode(), "format": "wav"}},
-            {"type": "text", "text": instruction},
-        ]}],
-        "temperature": 0,
-    }
-    if language:
-        payload["language"] = language
-    resp = await client.post(f"{server_url}/v1/chat/completions", json=payload)
-    resp.raise_for_status()
-    return (resp.json()["choices"][0]["message"].get("content") or "").strip()
-
-
 @app.get("/")
 async def index():
     return FileResponse(BASE_DIR / "static" / "index.html")
@@ -142,7 +97,18 @@ async def index():
 
 @app.get("/api/config")
 async def config():
-    return {"server_url": DEFAULT_SERVER_URL, "model": DEFAULT_MODEL}
+    return {"server_url": DEFAULT_SERVER_URL, "model": DEFAULT_MODEL,
+            "llm_url": DEFAULT_LLM_URL, "llm_model": DEFAULT_LLM_MODEL, "llm_has_key": bool(DEFAULT_LLM_KEY)}
+
+
+@app.get("/api/llm-status")
+async def llm_status(url: str = DEFAULT_LLM_URL, key: str = ""):
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {"Authorization": f"Bearer {key or DEFAULT_LLM_KEY}"} if key or DEFAULT_LLM_KEY else {}
+            return {"ok": True, "models": await text_llm.list_models(client, url, headers)}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc) or type(exc).__name__})
 
 
 @app.get("/api/status")
@@ -205,8 +171,11 @@ async def transcribe(
     model: str = Form(DEFAULT_MODEL),
     temperature: float = Form(0.0),
     max_tokens: int = Form(16384),
-    translate_to: str = Form(""),
-    translate_prompt: str = Form(""),
+    task: str = Form(""),
+    task_prompt: str = Form(""),
+    llm_url: str = Form(""),
+    llm_model: str = Form(""),
+    llm_key: str = Form(""),
 ):
     server_url = server_url.rstrip("/")
     suffix = Path(file.filename or "audio").suffix or ".bin"
@@ -229,21 +198,22 @@ async def transcribe(
             raise HTTPException(502, "model server ยังไม่มีโมเดลที่โหลดอยู่")
         model = info["models"][0]
 
-    translate_to = translate_to.strip()
-    if translate_to and info["kind"] != "nemo-speech":
+    task = task.strip()
+    if task and task not in LLM_TASKS:
+        raise HTTPException(400, f"unknown task {task}")
+    if task == "subtitles" and info["kind"] != "nemo-speech":
         raise HTTPException(400, "ซับไตเติลแปลภาษาต้องใช้ NeMo-Speech.cpp (ต้องการเวลาของแต่ละช่วงจาก server)")
-    target_name = LANGUAGE_NAMES.get(translate_to, translate_to)
-    # NVIDIA's speech translation prompt (NeMo-Speech.cpp docs/salm/prompts.md) unless the user wrote one.
-    translate_prompt = translate_prompt.strip() or f"Translate the speech into {target_name}."
-    payload = build_payload(info["kind"], model, wav, prompt.strip(), language.strip(),
-                            timestamps or bool(translate_to), system, temperature, max_tokens)
+    src_name = LANGUAGE_NAMES.get(language.strip(), language.strip()) or "the original language"
+    # LLM tasks transcribe with the default prompt first; the Thai result comes from the text LLM.
+    payload = build_payload(info["kind"], model, wav, "" if task else prompt.strip(), language.strip(),
+                            timestamps or task == "subtitles", system, temperature, max_tokens)
 
     async def stream():
         yield sse({"meta": {"model": model, "kind": info["kind"], "duration": duration}})
         try:
             timeout = httpx.Timeout(None, connect=10)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                transcription = None
+                transcription, source = None, ""
                 async with client.stream(
                     "POST", f"{server_url}/v1/chat/completions", json=payload
                 ) as resp:
@@ -254,46 +224,52 @@ async def transcribe(
                     async for line in resp.aiter_lines():
                         if not line:
                             continue
-                        yield line + "\n\n"
-                        if translate_to and line.startswith("data:") and "transcription" in line:
-                            try:
-                                event = json.loads(line[5:])
-                            except ValueError:
-                                continue
-                            choice = (event.get("choices") or [{}])[0]
-                            transcription = (event.get("transcription") or choice.get("transcription")
-                                             or (choice.get("delta") or {}).get("transcription") or transcription)
-                if not translate_to:
+                        if not task:
+                            yield line + "\n\n"
+                            continue
+                        # LLM task: show the transcript as the source text, keep it for step 2.
+                        if not line.startswith("data:") or line[5:].strip() == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(line[5:])
+                        except ValueError:
+                            continue
+                        choice = (event.get("choices") or [{}])[0]
+                        if piece := (choice.get("delta") or {}).get("content"):
+                            source += piece
+                            yield sse({"source_delta": piece})
+                        transcription = (event.get("transcription") or choice.get("transcription")
+                                         or (choice.get("delta") or {}).get("transcription") or transcription)
+                if not task:
+                    return
+                if not source.strip():
+                    yield sse({"error": "ถอดเสียงไม่ได้ข้อความ (เสียงเงียบหรือไม่มีเสียงพูด)"})
                     return
 
-                # Step 2: translate each subtitle cue's own audio, so the subtitles keep their timing.
-                cues = [{"start": c["start"], "end": c["end"], "text": c.get("text", "")}
-                        for c in (transcription or {}).get("subtitle_cues") or []]
-                if not cues:
-                    cues = fallback_cues(duration)
-                yield sse({"translate_start": {"cues": cues, "target": target_name}})
-                pcm = wav_pcm(wav)
-                limit = asyncio.Semaphore(TRANSLATE_CONCURRENCY)
-
-                async def one(i: int, cue: dict) -> tuple[int, str, str | None]:
-                    async with limit:
-                        try:
-                            text = await translate_audio(client, server_url, model,
-                                                         wav_segment(pcm, cue["start"], cue["end"]),
-                                                         translate_prompt, language.strip())
-                            return i, text, None
-                        except Exception as exc:
-                            return i, "", str(exc)[:300]
-
-                tasks = [asyncio.create_task(one(i, c)) for i, c in enumerate(cues)]
-                try:
-                    for done in asyncio.as_completed(tasks):
-                        i, text, err = await done
+                llm = text_llm.LLM(client, llm_url.strip() or DEFAULT_LLM_URL,
+                                   llm_model.strip() or DEFAULT_LLM_MODEL, llm_key.strip() or DEFAULT_LLM_KEY)
+                await llm.resolve_model()
+                yield sse({"llm": {"model": llm.model, "url": llm.url}})
+                if task == "subtitles":
+                    cues = [{"start": c["start"], "end": c["end"], "text": c.get("text", "")}
+                            for c in (transcription or {}).get("subtitle_cues") or []]
+                    if not cues:
+                        yield sse({"error": "server ไม่ได้ส่งเวลาของแต่ละช่วงกลับมา จึงทำซับไตเติลไม่ได้"})
+                        return
+                    yield sse({"translate_start": {"cues": cues, "target": "Thai"}})
+                    async for i, text, err in text_llm.translate_cues(llm, cues, src_name, task_prompt):
                         yield sse({"translated": {"index": i, "text": text, "error": err}})
-                finally:
-                    for t in tasks:
-                        t.cancel()
-                yield sse({"translate_done": True})
+                    yield sse({"translate_done": True})
+                    return
+                pieces = {
+                    "translate": lambda: text_llm.translate_text(llm, source, src_name, task_prompt),
+                    "summary": lambda: text_llm.summarize(llm, source, task_prompt),
+                    "qa": lambda: text_llm.answer(llm, source, task_prompt),
+                }[task]()
+                async for piece in pieces:
+                    yield sse({"choices": [{"index": 0, "delta": {"content": piece}}]})
+        except text_llm.LLMError as exc:
+            yield sse({"error": str(exc)})
         except httpx.ConnectError:
             yield sse({"error": f"เชื่อมต่อ model server ที่ {server_url} ไม่ได้ — server รันอยู่หรือเปล่า?"})
         except Exception as exc:
